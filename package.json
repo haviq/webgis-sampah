@@ -1,0 +1,30 @@
+{
+  "name": "webgis-sampah",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.43.4",
+    "axios": "^1.7.2",
+    "leaflet": "^1.9.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1",
+    "react-router-dom": "^6.23.1",
+    "recharts": "^3.8.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
+    "vite": "^5.2.11",
+    "vite-plugin-pwa": "^1.3.0"
+  }
+}

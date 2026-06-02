@@ -1,0 +1,11 @@
+/* 
+  =========================================
+  App.css (Unified Styling System)
+  =========================================
+  Semua sistem desain, layout dasar, tema warna, 
+  glassmorphism, dasbor, dan animasi telah disatukan 
+  ke dalam file: src/index.css
+  
+  Ini dilakukan agar sistem styling aplikasi modular, 
+  konsisten, dan terhindar dari konflik CSS ganda.
+*/
