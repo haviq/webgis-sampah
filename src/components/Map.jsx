@@ -49,14 +49,16 @@ export const parseLocation = (loc) => {
   return null;
 };
 
-function MapEvents({ setLatLng, center }) {
+function MapEvents({ setLatLng, center, isLocked }) {
   const map = useMap();
   useEffect(() => { 
     if (center) map.setView(center, map.getZoom(), { animate: true }); 
   }, [center, map]);
   
   useMapEvents({ 
-    click: (e) => setLatLng && setLatLng(e.latlng) 
+    click: (e) => {
+      if (!isLocked && setLatLng) setLatLng(e.latlng);
+    }
   });
   return null;
 }
@@ -69,7 +71,7 @@ function FullscreenHandler({ isFullscreen }) {
   return null;
 }
 
-export default function Map({ setLatLng, selectedMarker, data = [], liveDrivers = [], routeCoords = null, returnRouteCoords = null }) {
+export default function Map({ setLatLng, selectedMarker, data = [], liveDrivers = [], routeCoords = null, returnRouteCoords = null, isLocked = false }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -95,7 +97,7 @@ export default function Map({ setLatLng, selectedMarker, data = [], liveDrivers 
         
         // Update selection state and map view
         setLocalCenter(newLatlng);
-        if (setLatLng) setLatLng(newLatlng);
+        if (!isLocked && setLatLng) setLatLng(newLatlng);
       } else {
         alert("Lokasi tidak ditemukan. Coba pencarian lain.");
       }
@@ -151,9 +153,9 @@ export default function Map({ setLatLng, selectedMarker, data = [], liveDrivers 
               {isFullscreen ? "🗗 Tutup Fullscreen" : "🖵 Fullscreen"}
             </button>
 
-            <MapContainer preferCanvas={true} center={[center.lat, center.lng]} zoom={13} style={{ height: isFullscreen ? "100%" : "350px", width: "100%", flex: 1 }}>
+            <MapContainer preferCanvas={true} center={[localCenter.lat, localCenter.lng]} zoom={13} style={{ height: isFullscreen ? "100%" : "350px", width: "100%", flex: 1 }}>
               <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-              <MapEvents setLatLng={setLatLng} center={center} />
+              <MapEvents setLatLng={setLatLng} center={localCenter} isLocked={isLocked} />
               <FullscreenHandler isFullscreen={isFullscreen} />
               
               {data.map((item, i) => {

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import AccountSettings from "../components/AccountSettings";
 import Map from "../components/Map";
 import Sidebar from "../components/Sidebar";
+import TypingLoader from "../components/TypingLoader";
 import ChatWidget from "../components/ChatWidget";
 import gsap from "gsap";
 import Swal from "sweetalert2";
@@ -26,6 +28,8 @@ export default function Warga() {
   const [katalogRedeem, setKatalogRedeem] = useState([]);
   const [liveDrivers, setLiveDrivers] = useState({});
   const [trackingChannel, setTrackingChannel] = useState(null);
+  const [reports, setReports] = useState([]);
+  const [isLocationLocked, setIsLocationLocked] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
 
   useEffect(() => {
@@ -107,14 +111,15 @@ export default function Warga() {
       try {
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (authUser) {
-          const { data: profile } = await supabase.from("profiles").select("name").eq("id", authUser.id).maybeSingle();
+          const { data: profile } = await supabase.from("profiles").select("*").eq("id", authUser.id).maybeSingle();
           const nama = profile?.name || "";
-          setUser({ nama, email: authUser.email });
+          setUser({ id: authUser.id, nama, email: authUser.email, avatar_url: profile?.avatar_url });
 
           const { data: wd } = await supabase.from("warga").select("*").eq("id", authUser.id).order("id", { ascending: false }).limit(1).maybeSingle();
           if (wd) {
             setWargaData(wd);
             setForm(f => ({ ...f, nama: wd.nama, alamat: wd.alamat }));
+            setIsLocationLocked(true);
             try {
               if (wd.location && typeof wd.location === "string") {
                 const m = wd.location.match(/POINT\s*\(\s*([^\s]+)\s+([^\s]+)\s*\)/i);
@@ -126,12 +131,13 @@ export default function Warga() {
             await refreshHistory(wd.id);
           } else {
             setForm(f => ({ ...f, nama }));
-            setActiveTab("pengaturan");
+            setActiveTab("pengaturan-aplikasi");
           }
         }
       } catch (err) {
         console.error(err);
       } finally {
+        await new Promise(res => setTimeout(res, 1500));
         setLoading(false);
       }
     };
@@ -221,6 +227,13 @@ export default function Warga() {
   };
 
   const getBulanIni = () => new Date().toISOString().slice(0, 7);
+  
+  const getSisaKuota = () => {
+    const bulan = getBulanIni();
+    const count = history.angkut.filter(a => a.created_at && a.created_at.startsWith(bulan)).length;
+    return Math.max(0, 4 - count);
+  };
+
   const statusBayarBulanIni = () => {
     const bulan = getBulanIni();
     const records = history.bayar.filter(b => b.tanggal && b.tanggal.startsWith(bulan));
@@ -284,6 +297,45 @@ export default function Warga() {
     totalBiaya = baseFee + Math.round(jarakKeTpa * feePerKm);
   }
 
+  const handleUnlockLocation = async () => {
+    const { value: password } = await Swal.fire({
+      title: 'Kunci Koordinat',
+      text: "Masukkan password Anda untuk mengizinkan perubahan lokasi.",
+      input: 'password',
+      inputPlaceholder: 'Password akun Anda',
+      showCancelButton: true,
+      confirmButtonText: 'Buka Kunci',
+      cancelButtonText: 'Batal',
+      confirmButtonColor: '#3b82f6',
+      inputValidator: (value) => {
+        if (!value) {
+          return 'Password tidak boleh kosong!'
+        }
+      }
+    });
+
+    if (password) {
+      // Verifikasi password
+      const { error } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: password,
+      });
+
+      if (error) {
+        Swal.fire({ icon: 'error', title: 'Gagal', text: 'Password salah.' });
+      } else {
+        setIsLocationLocked(false);
+        Swal.fire({ 
+          icon: 'success', 
+          title: 'Terbuka', 
+          text: 'Silakan klik pada peta untuk mengubah koordinat baru.', 
+          timer: 2000, 
+          showConfirmButton: false 
+        });
+      }
+    }
+  };
+
   const menuItems = [
     {
       id: "dashboard", label: "Dashboard",
@@ -307,8 +359,13 @@ export default function Warga() {
     },
     {
       id: "pengaturan", label: "Pengaturan",
-      icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-    },
+      icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+      subItems: [
+        { id: "pengaturan-aplikasi", label: "Profil & Lokasi" },
+        { id: "pengaturan-keamanan", label: "Keamanan & Akun" },
+        { id: "pengaturan-bantuan", label: "Bantuan & FAQ" }
+      ]
+    }
   ];
 
   const statusColor = (s) => {
@@ -319,12 +376,13 @@ export default function Warga() {
 
   return (
     <div className="dashboard-layout">
+      {loading && <TypingLoader />}
       <Sidebar
         user={user}
         role="warga"
         activeTab={activeTab}
         setActiveTab={(tab) => {
-          if (!wargaData && tab !== "pengaturan") return alert("Silakan lengkapi profil dan lokasi rumah Anda terlebih dahulu!");
+          if (!wargaData && !tab.startsWith("pengaturan")) return alert("Silakan lengkapi profil dan lokasi rumah Anda terlebih dahulu!");
           setActiveTab(tab);
         }}
         isCollapsed={isCollapsed}
@@ -340,11 +398,8 @@ export default function Warga() {
           <span className="badge-role">ECO CITIZEN</span>
         </div>
 
-        {loading ? (
-          <div style={{ textAlign: "center", padding: "60px", color: "var(--color-text-muted)" }}>Memuat data...</div>
-        ) : (
-          <>
-            {activeTab === "dashboard" && (
+        <>
+          {activeTab === "dashboard" && (
               <>
                 <div className="dashboard-grid">
                   <div className="stat-card">
@@ -428,11 +483,12 @@ export default function Warga() {
               </>
             )}
 
-            {activeTab === "pengaturan" && (
-              <>
+            {/* ── TAB: Pengaturan Aplikasi (Profil & Peta) ── */}
+            {activeTab === "pengaturan-aplikasi" && (
+              <div className="card-animated">
                 <div className="map-container-wrapper" style={{ marginTop: 0 }}>
                   <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>
-                    {!wargaData ? "👋 Selamat Datang! Silakan Lengkapi Profil Anda" : "Pengaturan Aplikasi & Profil"}
+                    {!wargaData ? "👋 Selamat Datang! Silakan Lengkapi Profil Anda" : "Profil & Lokasi Penjemputan"}
                   </h3>
                   <div className="grid-form-map">
                     <div>
@@ -444,14 +500,36 @@ export default function Warga() {
                         <label className="form-label">Alamat Rumah</label>
                         <input className="form-input" placeholder="Masukkan alamat" value={form.alamat} onChange={e => setForm({ ...form, alamat: e.target.value })} />
                       </div>
-                      <div style={{ padding: "10px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", marginBottom: "16px" }}>
-                        {latlng
-                          ? <span style={{ color: "var(--color-primary)", fontWeight: 600 }}>📍 Koordinat: Lat {latlng.lat.toFixed(6)}, Lng {latlng.lng.toFixed(6)}</span>
-                          : <span style={{ color: "#dc2626" }}>⚠️ Klik peta di samping untuk menandai lokasi rumah Anda</span>}
+                      <div style={{ padding: "10px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          {latlng
+                            ? <span style={{ color: "var(--color-primary)", fontWeight: 600 }}>📍 Koordinat: Lat {latlng.lat.toFixed(6)}, Lng {latlng.lng.toFixed(6)}</span>
+                            : <span style={{ color: "#dc2626" }}>⚠️ Klik peta di samping untuk menandai lokasi rumah Anda</span>}
+                        </div>
+                        {wargaData && (
+                          <button 
+                            onClick={isLocationLocked ? handleUnlockLocation : () => setIsLocationLocked(true)} 
+                            className="btn-primary"
+                            style={{ 
+                              background: isLocationLocked ? "#e2e8f0" : "#dcfce7", 
+                              color: isLocationLocked ? "#475569" : "#16a34a", 
+                              padding: "4px 8px", 
+                              borderRadius: "4px", 
+                              fontSize: "11px", 
+                              fontWeight: 700, 
+                              border: isLocationLocked ? "1px solid #cbd5e1" : "1px solid #86efac", 
+                              width: "auto",
+                              transition: "all 0.2s ease" 
+                            }}
+                          >
+                            {isLocationLocked ? "🔒 Terkunci" : "🔓 Terbuka"}
+                          </button>
+                        )}
                       </div>
                       <button onClick={async () => {
                         await saveProfile();
                         if (latlng && form.nama && form.alamat) {
+                          setIsLocationLocked(true);
                           setActiveTab("dashboard");
                         }
                       }} className="btn-primary">
@@ -460,49 +538,67 @@ export default function Warga() {
                     </div>
                     <div>
                       <label className="form-label">Peta Interaktif — Cari & Klik untuk Plot Koordinat</label>
-                      <Map setLatLng={setLatLng} selectedMarker={latlng} data={wargaData ? [{ ...wargaData, pembayaran: [{ status: statusBulanIni?.status || "belum" }] }] : []} liveDrivers={Object.values(liveDrivers)} />
-                    </div>
-                  </div>
-                  
-                  {/* Bantuan & FAQ Section */}
-                  <div style={{ marginTop: "30px", borderTop: "1px solid #e2e8f0", paddingTop: "24px" }}>
-                    <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>
-                      Bantuan Penggunaan & Tanya Jawab (FAQ)
-                    </h3>
-                    <div className="grid-2-col">
-                      <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                        <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Cara Memesan Truk Sampah</h4>
-                        <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
-                          Buka tab <strong>Laporkan Sampah</strong>, masukkan perkiraan berat sampah, lalu klik tombol biru "Panggil Truk & Lapor Sampah". Truk terdekat akan melihat laporan Anda di petanya.
-                        </p>
-                      </div>
-                      <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                        <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Mengubah Koordinat Lokasi</h4>
-                        <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
-                          Di bagian atas halaman ini, cukup geser peta dan klik pada titik rumah Anda yang baru. Koordinat akan diperbarui, lalu klik "Simpan Perubahan".
-                        </p>
-                      </div>
-                      <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                        <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Sistem Retribusi & Jarak</h4>
-                        <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
-                          Tagihan bulanan Anda dihitung berdasarkan Jarak Mengemudi Asli dari rumah Anda ke TPA Pusat. Kami menggunakan teknologi OSRM sehingga jaraknya sangat akurat mengikuti jalan raya.
-                        </p>
-                      </div>
-                      <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                        <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Tentang Poin Daur Ulang</h4>
-                        <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
-                          Setiap kg sampah Plastik/Kertas dan Organik yang disetor akan menambah Poin Anda. Poin ini nantinya bisa ditukar menjadi Voucher di tab <strong>Tukar Poin</strong>.
-                        </p>
-                      </div>
+                      <Map setLatLng={setLatLng} selectedMarker={latlng} data={wargaData ? [{ ...wargaData, pembayaran: [{ status: statusBulanIni?.status || "belum" }] }] : []} liveDrivers={Object.values(liveDrivers)} isLocked={isLocationLocked} />
                     </div>
                   </div>
                 </div>
-              </>
+              </div>
+            )}
+
+            {/* ── TAB: Pengaturan Keamanan ── */}
+            {activeTab === "pengaturan-keamanan" && (
+              <div className="card-animated">
+                <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                  <AccountSettings user={user} setUser={setUser} />
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB: Bantuan & FAQ ── */}
+            {activeTab === "pengaturan-bantuan" && (
+              <div className="card-animated">
+                <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>
+                    Bantuan Penggunaan & Tanya Jawab (FAQ)
+                  </h3>
+                  <div className="grid-2-col">
+                    <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                      <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Cara Memesan Truk Sampah</h4>
+                      <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                        Buka tab <strong>Laporkan Sampah</strong>, masukkan perkiraan berat sampah, lalu klik tombol biru "Panggil Truk & Lapor Sampah". Truk terdekat akan melihat laporan Anda di petanya.
+                      </p>
+                    </div>
+                    <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                      <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Mengubah Koordinat Lokasi</h4>
+                      <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                        Di bagian atas halaman ini, cukup geser peta dan klik pada titik rumah Anda yang baru. Koordinat akan diperbarui, lalu klik "Simpan Perubahan".
+                      </p>
+                    </div>
+                    <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                      <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Sistem Retribusi & Jarak</h4>
+                      <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                        Tagihan bulanan Anda dihitung berdasarkan Jarak Mengemudi Asli dari rumah Anda ke TPA Pusat. Kami menggunakan teknologi OSRM sehingga jaraknya sangat akurat mengikuti jalan raya.
+                      </p>
+                    </div>
+                    <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                      <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Tentang Poin Daur Ulang</h4>
+                      <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                        Poin didapat saat membuang sampah, dan bisa dikonversikan menjadi uang. Total poin Anda dan ekuivalen uangnya bisa dilihat di header Dashboard.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
 
             {activeTab === "laporan" && (
               <div className="map-container-wrapper" style={{ marginTop: 0 }}>
-                <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Form Pelaporan Sampah & Request Angkut</h3>
+                <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>Form Pelaporan Sampah & Request Angkut</span>
+                  <span style={{ fontSize: "12px", fontWeight: "bold", padding: "4px 8px", borderRadius: "6px", backgroundColor: getSisaKuota() > 0 ? "#dbeafe" : "#fee2e2", color: getSisaKuota() > 0 ? "#1e3a8a" : "#991b1b" }}>
+                    Sisa Kuota Jemput Bulan Ini: {getSisaKuota()}/4
+                  </span>
+                </h3>
                 <div className="grid-2-col">
                   <div>
                     <div className="form-group">
@@ -520,8 +616,9 @@ export default function Warga() {
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                       {(() => {
+                        const sisaKuota = getSisaKuota();
                         const hasActiveRequest = history.angkut.some(a => a.status === "Menunggu" || a.status === "proses");
-                        const isDisabled = loading || statusBulanIni?.status !== "sudah" || hasActiveRequest;
+                        const isDisabled = loading || statusBulanIni?.status !== "sudah" || hasActiveRequest || sisaKuota === 0;
                         
                         return (
                           <button 
@@ -537,9 +634,10 @@ export default function Warga() {
                             }}
                           >
                             <div style={{ fontSize: "15px", fontWeight: "700" }}>
-                              {loading ? "Memproses..." : hasActiveRequest ? "Truk Penjemputan Sedang Dijadwalkan" : (form.berat ? `Panggil Truk & Klaim Poin (+${Math.round(parseFloat(form.berat) * 10)})` : "Panggil Truk Saja (Tanpa Poin)")}
+                              {loading ? "Memproses..." : hasActiveRequest ? "Truk Penjemputan Sedang Dijadwalkan" : sisaKuota === 0 ? "Kuota Habis Bulan Ini" : (form.berat ? `Panggil Truk & Klaim Poin (+${Math.round(parseFloat(form.berat) * 10)})` : "Panggil Truk Saja (Tanpa Poin)")}
                             </div>
                             {!hasActiveRequest && statusBulanIni?.status !== "sudah" && <div style={{ fontSize: "11px", marginTop: "4px" }}>(Anda Belum Lunas Iuran Bulan Ini)</div>}
+                            {statusBulanIni?.status === "sudah" && !hasActiveRequest && sisaKuota > 0 && <div style={{ fontSize: "11px", marginTop: "4px" }}>(Sisa Kuota: {sisaKuota}x)</div>}
                           </button>
                         );
                       })()}
@@ -554,6 +652,38 @@ export default function Warga() {
                       <p><strong>4. Panggil Truk Saja:</strong> Jika Anda hanya ingin truk datang mengambil residu tanpa menabung poin, kosongkan kolom berat.</p>
                     </div>
                   </div>
+                </div>
+                <div style={{ marginTop: "32px", paddingTop: "24px", borderTop: "1px solid #e2e8f0" }}>
+                  <h4 style={{ fontSize: "14px", fontWeight: 700, color: "var(--color-text-main)", marginBottom: "12px" }}>Riwayat Penjemputan</h4>
+                  <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", fontSize: "13px", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
+                            <th style={{ padding: "8px" }}>Tanggal</th>
+                            <th style={{ padding: "8px" }}>Truk</th>
+                            <th style={{ padding: "8px" }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {history.angkut.length === 0 && <tr><td colSpan="3" style={{ padding: "12px", textAlign: "center", color: "#9ca3af" }}>Belum ada riwayat</td></tr>}
+                          {history.angkut.slice(0).reverse().map(a => (
+                            <tr key={a.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                              <td style={{ padding: "8px" }}>{new Date(a.created_at).toLocaleDateString("id-ID", { day: 'numeric', month: 'short' })}</td>
+                              <td style={{ padding: "8px" }}>{a.transporter?.profiles?.name || "-"}</td>
+                              <td style={{ padding: "8px" }}>
+                                <span style={{
+                                  padding: "2px 6px", borderRadius: "4px", fontSize: "11px", fontWeight: "bold",
+                                  backgroundColor: a.status === "selesai" ? "#dcfce7" : a.status === "proses" ? "#fef3c7" : "#e0e7ff",
+                                  color: a.status === "selesai" ? "#166534" : a.status === "proses" ? "#92400e" : "#3730a3"
+                                }}>
+                                  {a.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                 </div>
               </div>
             )}
@@ -834,8 +964,7 @@ export default function Warga() {
                 </div>
               </div>
             )}
-          </>
-        )}
+        </>
       </main>
 
       {wargaData && (
