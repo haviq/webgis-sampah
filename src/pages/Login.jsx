@@ -42,10 +42,8 @@ export default function Login() {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <div className="auth-logo-wrapper">
-            <svg className="auth-logo-svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M9 11l3 3L22 4" />
-            </svg>
+          <div className="auth-logo-wrapper" style={{ background: "transparent", width: "140px", height: "140px", margin: "0 auto 16px auto" }}>
+            <img src="/logo.png" alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           <h2 className="auth-title">WebGIS Persampahan</h2>
           <p className="auth-subtitle">Silakan masuk menggunakan akun Anda</p>

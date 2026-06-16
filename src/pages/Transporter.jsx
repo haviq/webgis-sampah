@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import Map, { parseLocation } from "../components/Map";
 import Sidebar from "../components/Sidebar";
+import gsap from "gsap";
 
 export default function Transporter() {
   const [user, setUser] = useState({ nama: "Transporter", email: "" });
@@ -13,6 +14,7 @@ export default function Transporter() {
   const [selesaiModal, setSelesaiModal] = useState({ open: false, id: null, file: null, loading: false });
   const [myLocation, setMyLocation] = useState(null);
   const [routeCoords, setRouteCoords] = useState(null);
+  const [returnRouteCoords, setReturnRouteCoords] = useState(null);
 
   useEffect(() => {
     const channel = supabase.channel('tracking')
@@ -27,7 +29,8 @@ export default function Transporter() {
   }, []);
 
   // Real data
-  const [stats, setStats] = useState({ rute: 0, titik: 0, muatan: "0%", selesai: 0 });
+  const [stats, setStats] = useState({ rute: 0, titik: 0, muatan: "0%", selesai: "0/0" });
+  const [focusedLocation, setFocusedLocation] = useState(null);
   const [allWarga, setAllWarga] = useState([]);
   const [tugas, setTugas] = useState([]);
   const [myId, setMyId] = useState(null);
@@ -46,7 +49,14 @@ export default function Transporter() {
       const tugasData = tRes.data || [];
 
       setAllWarga(wargaData);
-      setTugas(tugasData);
+      const sortedTugas = tugasData.sort((a, b) => {
+        // "proses" / pending di atas, "selesai" di bawah
+        if (a.status === "selesai" && b.status !== "selesai") return 1;
+        if (a.status !== "selesai" && b.status === "selesai") return -1;
+        // Sort by id / date descending (newest first) as secondary sort
+        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      });
+      setTugas(sortedTugas);
 
       const selesai = tugasData.filter(t => t.status === "selesai").length;
       setStats({
@@ -72,6 +82,14 @@ export default function Transporter() {
       }
     });
   }, []);
+
+  // GSAP Animations
+  useEffect(() => {
+    if (!loading) {
+      gsap.from(".stat-card", { duration: 0.6, y: 30, opacity: 0, stagger: 0.1, ease: "power2.out" });
+      gsap.from(".map-container-wrapper", { duration: 0.8, y: 40, opacity: 0, delay: 0.3, ease: "power2.out" });
+    }
+  }, [loading, activeTab]);
 
   const updateTugas = async (id, status, file = null) => {
     let bukti_url = null;
@@ -138,33 +156,74 @@ export default function Transporter() {
   };
 
   useEffect(() => {
-    if (!myLocation || tugas.filter(t => t.status === "proses").length === 0) {
-      setRouteCoords(null);
-      return;
+    const origin = myLocation ? myLocation : { lat: -7.8488, lng: 110.4398 };
+    const coords = [`${origin.lng},${origin.lat}`];
+
+    if (focusedLocation) {
+      coords.push(`${focusedLocation.lng},${focusedLocation.lat}`);
+    } else {
+      const pending = tugas.filter(t => t.status === "proses");
+      if (pending.length === 0) {
+        setRouteCoords(null);
+        setReturnRouteCoords(null);
+        return;
+      }
+      pending.forEach(t => {
+        const loc = parseLocation(t.warga?.location);
+        if (loc) coords.push(`${loc.lng},${loc.lat}`);
+      });
     }
-    const coords = [`${myLocation.lng},${myLocation.lat}`];
-    tugas.filter(t => t.status === "proses").forEach(t => {
-      const loc = parseLocation(t.warga?.location);
-      if (loc) coords.push(`${loc.lng},${loc.lat}`);
-    });
     
     if (coords.length > 1) {
-      fetch(`https://router.project-osrm.org/route/v1/driving/${coords.join(';')}?overview=full&geometries=geojson`)
+      // Jika tujuan lebih dari 1 (coords > 2), gunakan Trip API untuk optimasi TSP (Traveling Salesperson)
+      // Jika hanya 1 tujuan (coords == 2), gunakan Route API biasa
+      const apiType = coords.length > 2 && !focusedLocation ? "trip" : "route";
+      const extraParams = apiType === "trip" ? "&source=first&roundtrip=false" : "";
+      
+      fetch(`https://router.project-osrm.org/${apiType}/v1/driving/${coords.join(';')}?overview=simplified&geometries=geojson${extraParams}`)
         .then(r => r.json())
         .then(data => {
-           if (data.code === "Ok" && data.routes.length > 0) {
-             const geojson = data.routes[0].geometry;
+           const routeData = data.trips || data.routes;
+           if (data.code === "Ok" && routeData && routeData.length > 0) {
+             const geojson = routeData[0].geometry;
              const latlngs = geojson.coordinates.map(c => [c[1], c[0]]);
              setRouteCoords(latlngs);
+
+             // Calculate return route to TPA
+             let lastLoc = null;
+             if (apiType === "trip" && data.waypoints && data.waypoints.length > 0) {
+               const lastWp = data.waypoints.reduce((prev, current) => (prev.waypoint_index > current.waypoint_index) ? prev : current);
+               lastLoc = lastWp.location; // [lng, lat]
+             } else if (data.waypoints && data.waypoints.length > 0) {
+               lastLoc = data.waypoints[data.waypoints.length - 1].location;
+             }
+
+             if (lastLoc) {
+               const tpaLngLat = `110.4398,-7.8488`;
+               fetch(`https://router.project-osrm.org/route/v1/driving/${lastLoc[0]},${lastLoc[1]};${tpaLngLat}?overview=simplified&geometries=geojson`)
+                 .then(r => r.json())
+                 .then(retData => {
+                   if (retData.code === "Ok" && retData.routes.length > 0) {
+                     const retGeojson = retData.routes[0].geometry;
+                     const retLatlngs = retGeojson.coordinates.map(c => [c[1], c[0]]);
+                     setReturnRouteCoords(retLatlngs);
+                   }
+                 });
+             } else {
+               setReturnRouteCoords(null);
+             }
            }
         }).catch(err => console.error("OSRM Error:", err));
+    } else {
+      setRouteCoords(null);
+      setReturnRouteCoords(null);
     }
-  }, [myLocation, tugas]);
+  }, [myLocation, tugas, focusedLocation]);
 
   const openRoute = (loc) => {
     const p = parseLocation(loc);
     if (p) {
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`, "_blank");
+      setFocusedLocation(p);
     } else {
       alert("Lokasi rumah warga belum tersedia.");
     }
@@ -273,6 +332,25 @@ export default function Transporter() {
                   </div>
                 </div>
 
+                {/* Peta Rute */}
+                <div className="map-container-wrapper">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                    <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text-main)" }}>Pemantauan Armada (Live Peta)</h3>
+                    {focusedLocation && (
+                      <button onClick={() => setFocusedLocation(null)} className="btn-primary" style={{ padding: "6px 12px", fontSize: "12px", width: "auto", background: "#f59e0b", borderColor: "#d97706", borderRadius: "4px" }}>
+                        Lihat Semua Rute
+                      </button>
+                    )}
+                  </div>
+                  <Map 
+                    data={allWarga.filter(w => tugas.some(t => t.warga_id === w.id && t.status === "proses"))} 
+                    liveDrivers={myLocation ? [{ ...myLocation, id: myId }] : [{ lat: -7.8488, lng: 110.4398, id: 'tpa_base' }]} 
+                    routeCoords={routeCoords} 
+                    returnRouteCoords={returnRouteCoords}
+                    selectedMarker={focusedLocation}
+                  />
+                </div>
+
                 {/* Daftar Rute Pengambilan */}
                 <div className="map-container-wrapper">
                   <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Daftar Rute Pengambilan Aktif</h3>
@@ -299,9 +377,11 @@ export default function Transporter() {
                             {t.status === "proses" && (
                               <button onClick={() => setSelesaiModal({ open: true, id: t.id, file: null, loading: false })} className="btn-primary" style={{ padding: "6px 14px", fontSize: "12px", width: "auto", background: "#059669", borderColor: "#047857" }}>✓ Selesai</button>
                             )}
-                            <button onClick={() => openRoute(t.warga?.location)} className="btn-primary" style={{ padding: "6px 14px", fontSize: "12px", width: "auto", background: "#3b82f6", borderColor: "#2563eb" }}>
-                              Mulai Navigasi
-                            </button>
+                            {t.status !== "selesai" && (
+                              <button onClick={() => openRoute(t.warga?.location)} className="btn-primary" style={{ padding: "6px 14px", fontSize: "12px", width: "auto", background: "#3b82f6", borderColor: "#2563eb" }}>
+                                Mulai Navigasi
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -311,11 +391,8 @@ export default function Transporter() {
 
                 {/* Peta Rute */}
                 <div className="map-container-wrapper">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
-                    <h3 style={{ fontSize: "16px", fontWeight: 700 }}>Peta Rute Navigasi Jemput Sampah</h3>
-                    {routeCoords && <span style={{ padding: "4px 12px", background: "#dbeafe", color: "#1d4ed8", borderRadius: "20px", fontSize: "12px", fontWeight: 700 }}>Navigasi Rute Aktif</span>}
-                  </div>
-                  <Map data={allWarga.filter(w => tugas.some(t => t.warga_id === w.id))} liveDrivers={myLocation ? [{ ...myLocation, id: myId }] : []} routeCoords={routeCoords} />
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Pemantauan Peta Jemputan</h3>
+                  <Map data={allWarga.filter(w => tugas.some(t => t.warga_id === w.id && t.status === "proses"))} liveDrivers={myLocation ? [{ ...myLocation, id: myId }] : []} routeCoords={routeCoords} returnRouteCoords={returnRouteCoords} />
                 </div>
               </>
             )}
@@ -416,7 +493,9 @@ export default function Transporter() {
                           {t.status === "proses" && (
                             <button onClick={() => setSelesaiModal({ open: true, id: t.id, file: null, loading: false })} className="btn-primary" style={{ padding: "4px 10px", fontSize: "11px", width: "auto", background: "#059669", borderColor: "#047857" }}>Selesai</button>
                           )}
-                          <button onClick={() => openRoute(t.warga?.location)} className="btn-primary" style={{ padding: "4px 10px", fontSize: "11px", width: "auto", background: "#3b82f6", borderColor: "#2563eb" }}>Rute</button>
+                          {t.status !== "selesai" && (
+                            <button onClick={() => openRoute(t.warga?.location)} className="btn-primary" style={{ padding: "4px 10px", fontSize: "11px", width: "auto", background: "#3b82f6", borderColor: "#2563eb" }}>Rute</button>
+                          )}
                         </div>
                       </div>
                     ))}

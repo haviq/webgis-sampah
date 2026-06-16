@@ -67,10 +67,8 @@ export default function Register() {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <div className="auth-logo-wrapper">
-            <svg className="auth-logo-svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+          <div className="auth-logo-wrapper" style={{ background: "transparent", width: "140px", height: "140px", margin: "0 auto 16px auto" }}>
+            <img src="/logo.png" alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           <h2 className="auth-title">Daftar Akun Baru</h2>
           <p className="auth-subtitle">Sistem Informasi Pengelolaan Sampah Kota</p>

@@ -3,6 +3,17 @@ import { supabase } from "../lib/supabase";
 import Map from "../components/Map";
 import Sidebar from "../components/Sidebar";
 import ChatWidget from "../components/ChatWidget";
+import gsap from "gsap";
+import Swal from "sweetalert2";
+
+function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+  var R = 6371; 
+  var dLat = (lat2-lat1) * (Math.PI/180);  
+  var dLon = (lon2-lon1) * (Math.PI/180); 
+  var a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * (Math.PI/180)) * Math.cos(lat2 * (Math.PI/180)) * Math.sin(dLon/2) * Math.sin(dLon/2); 
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  return R * c;
+}
 
 export default function Warga() {
   const [user, setUser] = useState({ nama: "Warga", email: "" });
@@ -38,6 +49,7 @@ export default function Warga() {
 
   const [wargaData, setWargaData] = useState(null);
   const [latlng, setLatLng] = useState(null);
+  const [osrmDistance, setOsrmDistance] = useState(null);
   const [form, setForm] = useState({ nama: "", alamat: "", jenis: "Plastik & Kertas", berat: "" });
   const [history, setHistory] = useState({ sampah: [], bayar: [], angkut: [] });
   const [stats, setStats] = useState({ laporan: 0, angkut: 0, poin: 0, lunas: 0 });
@@ -71,6 +83,22 @@ export default function Warga() {
     });
   };
 
+  // Fetch OSRM Driving Distance to TPA
+  useEffect(() => {
+    if (latlng) {
+      // TPA Piyungan Coordinates: -7.8286, 110.3789
+      // OSRM format: lng,lat;lng,lat
+      fetch(`https://router.project-osrm.org/route/v1/driving/${latlng.lng},${latlng.lat};110.3789,-7.8286?overview=false`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.routes && data.routes.length > 0) {
+            setOsrmDistance(data.routes[0].distance / 1000); // distance is in meters, convert to km
+          }
+        })
+        .catch(err => console.error("OSRM Error:", err));
+    }
+  }, [latlng]);
+
   const currentPoin = stats.poin - redeemHistory.filter(r => r.status !== 'ditolak').reduce((acc, r) => acc + r.points_cost, 0);
 
   useEffect(() => {
@@ -98,6 +126,7 @@ export default function Warga() {
             await refreshHistory(wd.id);
           } else {
             setForm(f => ({ ...f, nama }));
+            setActiveTab("pengaturan");
           }
         }
       } catch (err) {
@@ -108,6 +137,14 @@ export default function Warga() {
     };
     init();
   }, []);
+
+  // GSAP Animations
+  useEffect(() => {
+    if (!loading) {
+      gsap.from(".stat-card", { duration: 0.6, y: 30, opacity: 0, stagger: 0.1, ease: "power2.out" });
+      gsap.from(".map-container-wrapper", { duration: 0.8, y: 40, opacity: 0, delay: 0.3, ease: "power2.out" });
+    }
+  }, [loading, activeTab]);
 
   const saveProfile = async () => {
     if (!latlng) return alert("Pilih lokasi Anda pada peta terlebih dahulu!");
@@ -232,6 +269,21 @@ export default function Warga() {
 
   const statusBulanIni = statusBayarBulanIni();
 
+  // Kalkulasi Biaya Berdasarkan Jarak
+  let jarakKeTpa = osrmDistance || 0;
+  let totalBiaya = 30000;
+  
+  if (latlng && !osrmDistance) {
+    // Fallback ke garis lurus jika OSRM loading/gagal
+    jarakKeTpa = getDistanceFromLatLonInKm(latlng.lat, latlng.lng, -7.8286, 110.3789); 
+  }
+  
+  if (jarakKeTpa > 0) {
+    const baseFee = 30000;
+    const feePerKm = 2200;
+    totalBiaya = baseFee + Math.round(jarakKeTpa * feePerKm);
+  }
+
   const menuItems = [
     {
       id: "dashboard", label: "Dashboard",
@@ -253,6 +305,10 @@ export default function Warga() {
       id: "ecopoin", label: "Tukar Poin",
       icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>
     },
+    {
+      id: "pengaturan", label: "Pengaturan",
+      icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+    },
   ];
 
   const statusColor = (s) => {
@@ -267,7 +323,10 @@ export default function Warga() {
         user={user}
         role="warga"
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={(tab) => {
+          if (!wargaData && tab !== "pengaturan") return alert("Silakan lengkapi profil dan lokasi rumah Anda terlebih dahulu!");
+          setActiveTab(tab);
+        }}
         isCollapsed={isCollapsed}
         setIsCollapsed={setIsCollapsed}
         menuItems={menuItems}
@@ -320,8 +379,61 @@ export default function Warga() {
                   </div>
                 </div>
 
-                <div className="map-container-wrapper">
-                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Profil Spasial & Plotting Lokasi Rumah</h3>
+                <div className="grid-2-col" style={{ marginTop: "24px" }}>
+                  {/* Riwayat Aktivitas Terakhir */}
+                  <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                    <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Riwayat Aktivitas Terakhir</h3>
+                    {(() => {
+                      const combinedRiwayat = [
+                        ...history.sampah.map(s => ({ ...s, type: "sampah" })),
+                        ...history.angkut.filter(a => a.status === "selesai").map(a => ({ ...a, type: "angkut" }))
+                      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+                      if (combinedRiwayat.length === 0) {
+                        return <p style={{ color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada riwayat aktivitas.</p>;
+                      }
+
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                          {combinedRiwayat.slice(0, 5).map(item => (
+                            <div key={item.type + item.id} style={{ display: "flex", justifyContent: "space-between", padding: "12px", border: "1px solid #e2e8f0", borderRadius: "8px", fontSize: "13px", backgroundColor: "#fff" }}>
+                              <span style={{ fontWeight: 600 }}>
+                                {item.type === "sampah" ? `🚮 ${item.jenis}` : "🚚 Truk Selesai Mengangkut"}
+                              </span>
+                              <div style={{ display: "flex", gap: "12px" }}>
+                                {item.type === "sampah" ? (
+                                  <>
+                                    <span style={{ fontWeight: 700, color: "var(--color-primary)" }}>{item.berat} Kg</span>
+                                    <span style={{ fontWeight: 700, color: "#8b5cf6" }}>+{item.berat * 10} Poin</span>
+                                  </>
+                                ) : (
+                                  <span style={{ fontWeight: 700, color: "#10b981" }}>✓ Selesai</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Peta Lokasi Anda & Truk Terdekat */}
+                  <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                    <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Pantauan Peta: Lokasi Anda & Truk Aktif</h3>
+                    <div> {/* Interaksi Peta Diaktifkan */}
+                      <Map setLatLng={() => {}} selectedMarker={latlng} data={wargaData ? [{ ...wargaData, pembayaran: [{ status: statusBulanIni?.status || "belum" }] }] : []} liveDrivers={Object.values(liveDrivers)} />
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {activeTab === "pengaturan" && (
+              <>
+                <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>
+                    {!wargaData ? "👋 Selamat Datang! Silakan Lengkapi Profil Anda" : "Pengaturan Aplikasi & Profil"}
+                  </h3>
                   <div className="grid-form-map">
                     <div>
                       <div className="form-group">
@@ -335,13 +447,53 @@ export default function Warga() {
                       <div style={{ padding: "10px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", marginBottom: "16px" }}>
                         {latlng
                           ? <span style={{ color: "var(--color-primary)", fontWeight: 600 }}>📍 Koordinat: Lat {latlng.lat.toFixed(6)}, Lng {latlng.lng.toFixed(6)}</span>
-                          : <span style={{ color: "#dc2626" }}>⚠️ Klik peta untuk menandai lokasi rumah Anda</span>}
+                          : <span style={{ color: "#dc2626" }}>⚠️ Klik peta di samping untuk menandai lokasi rumah Anda</span>}
                       </div>
-                      <button onClick={saveProfile} className="btn-primary">Simpan Profil & Lokasi</button>
+                      <button onClick={async () => {
+                        await saveProfile();
+                        if (latlng && form.nama && form.alamat) {
+                          setActiveTab("dashboard");
+                        }
+                      }} className="btn-primary">
+                        {!wargaData ? "Simpan Profil & Mulai" : "Simpan Perubahan"}
+                      </button>
                     </div>
                     <div>
-                      <label className="form-label">Peta Interaktif — Klik untuk Plot Koordinat</label>
-                      <Map setLatLng={setLatLng} selectedMarker={latlng} data={wargaData ? [wargaData] : []} liveDrivers={Object.values(liveDrivers)} />
+                      <label className="form-label">Peta Interaktif — Cari & Klik untuk Plot Koordinat</label>
+                      <Map setLatLng={setLatLng} selectedMarker={latlng} data={wargaData ? [{ ...wargaData, pembayaran: [{ status: statusBulanIni?.status || "belum" }] }] : []} liveDrivers={Object.values(liveDrivers)} />
+                    </div>
+                  </div>
+                  
+                  {/* Bantuan & FAQ Section */}
+                  <div style={{ marginTop: "30px", borderTop: "1px solid #e2e8f0", paddingTop: "24px" }}>
+                    <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>
+                      Bantuan Penggunaan & Tanya Jawab (FAQ)
+                    </h3>
+                    <div className="grid-2-col">
+                      <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Cara Memesan Truk Sampah</h4>
+                        <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                          Buka tab <strong>Laporkan Sampah</strong>, masukkan perkiraan berat sampah, lalu klik tombol biru "Panggil Truk & Lapor Sampah". Truk terdekat akan melihat laporan Anda di petanya.
+                        </p>
+                      </div>
+                      <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Mengubah Koordinat Lokasi</h4>
+                        <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                          Di bagian atas halaman ini, cukup geser peta dan klik pada titik rumah Anda yang baru. Koordinat akan diperbarui, lalu klik "Simpan Perubahan".
+                        </p>
+                      </div>
+                      <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Sistem Retribusi & Jarak</h4>
+                        <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                          Tagihan bulanan Anda dihitung berdasarkan Jarak Mengemudi Asli dari rumah Anda ke TPA Pusat. Kami menggunakan teknologi OSRM sehingga jaraknya sangat akurat mengikuti jalan raya.
+                        </p>
+                      </div>
+                      <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Tentang Poin Daur Ulang</h4>
+                        <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                          Setiap kg sampah Plastik/Kertas dan Organik yang disetor akan menambah Poin Anda. Poin ini nantinya bisa ditukar menjadi Voucher di tab <strong>Tukar Poin</strong>.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -394,39 +546,13 @@ export default function Warga() {
                     </div>
                   </div>
                   <div>
-                    <h4 style={{ fontSize: "14px", fontWeight: 700, color: "var(--color-text-main)", marginBottom: "12px" }}>Riwayat Aktivitas Terakhir</h4>
-                    {(() => {
-                      const combinedRiwayat = [
-                        ...history.sampah.map(s => ({ ...s, type: "sampah" })),
-                        ...history.angkut.filter(a => a.status === "selesai").map(a => ({ ...a, type: "angkut" }))
-                      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-                      if (combinedRiwayat.length === 0) {
-                        return <p style={{ color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada riwayat aktivitas.</p>;
-                      }
-
-                      return (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                          {combinedRiwayat.slice(0, 6).map(item => (
-                            <div key={item.type + item.id} style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", backgroundColor: "#fff" }}>
-                              <span style={{ fontWeight: 500 }}>
-                                {item.type === "sampah" ? item.jenis : "Truk Selesai Mengangkut Sampah"}
-                              </span>
-                              <div style={{ display: "flex", gap: "12px" }}>
-                                {item.type === "sampah" ? (
-                                  <>
-                                    <span style={{ fontWeight: 700, color: "var(--color-primary)" }}>{item.berat} Kg</span>
-                                    <span style={{ fontWeight: 600, color: "#8b5cf6" }}>+{item.berat * 10} Poin</span>
-                                  </>
-                                ) : (
-                                  <span style={{ fontWeight: 700, color: "#10b981" }}>✓ Selesai</span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })()}
+                    <h4 style={{ fontSize: "14px", fontWeight: 700, color: "var(--color-text-main)", marginBottom: "12px" }}>💡 Petunjuk Pelaporan</h4>
+                    <div style={{ padding: "16px", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", fontSize: "13px", color: "#166534" }}>
+                      <p style={{ marginBottom: "8px" }}><strong>1. Jenis Sampah:</strong> Pastikan Anda memilah sampah sesuai kategori. Plastik dan Organik memiliki nilai jual yang lebih tinggi jika dipisah.</p>
+                      <p style={{ marginBottom: "8px" }}><strong>2. Estimasi Berat:</strong> Pengisian berat bersifat opsional. Jika Anda mengisi berat, Admin akan memverifikasinya saat penjemputan untuk pemberian <strong>Eco Poin</strong>.</p>
+                      <p style={{ marginBottom: "8px" }}><strong>3. Syarat Penjemputan:</strong> Truk hanya akan menjemput jika Anda sudah melunasi Iuran Retribusi bulan ini.</p>
+                      <p><strong>4. Panggil Truk Saja:</strong> Jika Anda hanya ingin truk datang mengambil residu tanpa menabung poin, kosongkan kolom berat.</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -480,7 +606,9 @@ export default function Warga() {
                     <div className="grid-2-col" style={{ marginBottom: "20px" }}>
                       {[
                         { label: "Periode Tagihan", value: new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" }) },
-                        { label: "Nominal Retribusi", value: "Rp 25.000 / bulan" },
+                        { label: "Biaya Dasar", value: "Rp 30.000" },
+                        { label: `Ongkos Jarak ke TPA (${jarakKeTpa.toFixed(1)} km)`, value: `Rp ${(Math.round(jarakKeTpa * 2200)).toLocaleString("id-ID")}` },
+                        { label: "Total Retribusi", value: `Rp ${totalBiaya.toLocaleString("id-ID")}` },
                       ].map((item, i) => (
                         <div key={i} style={{ padding: "14px 16px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
                           <div style={{ fontSize: "11px", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>{item.label}</div>
@@ -490,7 +618,7 @@ export default function Warga() {
                     </div>
 
                     <div style={{ display: "flex", flexDirection: "column", gap: "12px", alignItems: "center", backgroundColor: "#f8fafc", padding: "20px", borderRadius: "12px", border: "1px dashed #cbd5e1" }}>
-                      <p style={{ margin: 0, color: "var(--color-text-main)", textAlign: "center" }}>Silakan transfer sebesar <strong>Rp 25.000</strong> ke Rekening BCA <strong>1234567890</strong> a/n Pengelola Sampah.</p>
+                      <p style={{ margin: 0, color: "var(--color-text-main)", textAlign: "center", fontSize: "14px" }}>Silakan transfer sebesar <strong style={{ fontSize: "16px", color: "var(--color-primary)" }}>Rp {totalBiaya.toLocaleString("id-ID")}</strong> ke Rekening BCA <strong>1234567890</strong> a/n Pengelola Sampah.</p>
                       <div className="form-group" style={{ width: "100%", maxWidth: "300px" }}>
                         <label className="form-label" style={{ textAlign: "center" }}>Upload Bukti Transfer (Opsional)</label>
                         <input type="file" accept="image/*" onChange={(e) => setBuktiFile(e.target.files[0])} className="form-input" style={{ padding: "8px" }} />
@@ -502,13 +630,6 @@ export default function Warga() {
                   </div>
                 )}
 
-                {/* Riwayat semua pembayaran */}
-                <div className="map-container-wrapper" style={{ marginTop: "24px" }}>
-                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Lokasi Rumah & Pemantauan Live Truk</h3>
-                  {wargaData && (
-                    <Map data={[wargaData]} liveDrivers={Object.values(liveDrivers)} />
-                  )}
-                </div>
                 <div className="map-container-wrapper" style={{ marginTop: 0 }}>
                   <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>
                     Riwayat Pembayaran Retribusi
@@ -633,7 +754,17 @@ export default function Warga() {
                           <button
                             onClick={async () => {
                               if (currentPoin < item.cost) return alert("Poin Anda tidak cukup!");
-                              if (!window.confirm("Tukar poin dengan " + item.name + "?")) return;
+                              const result = await Swal.fire({
+                                title: "Konfirmasi Tukar Poin",
+                                text: "Tukar poin dengan " + item.name + "?",
+                                icon: "question",
+                                showCancelButton: true,
+                                confirmButtonColor: "#10b981",
+                                cancelButtonColor: "#6b7280",
+                                confirmButtonText: "Ya, Tukar",
+                                cancelButtonText: "Batal"
+                              });
+                              if (!result.isConfirmed) return;
                               const { error } = await supabase.from("redeem_poin").insert({ warga_id: wargaData.id, item_name: item.name, points_cost: item.cost });
                               if (error) return alert("Gagal tukar poin: " + error.message);
                               alert("✅ Permintaan tukar poin berhasil dikirim! Menunggu persetujuan Admin.");

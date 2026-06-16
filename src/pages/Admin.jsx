@@ -6,6 +6,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import ChatWidget from "../components/ChatWidget";
+import gsap from "gsap";
+import Swal from "sweetalert2";
 
 export default function Admin() {
   const [user, setUser] = useState({ nama: "Admin", email: "" });
@@ -136,14 +138,42 @@ export default function Admin() {
   };
 
   const tolakPembayaran = async (id) => {
-    if (!confirm("Tolak pembayaran ini? Data akan dihapus agar warga bisa kirim ulang.")) return;
+    const result = await Swal.fire({
+      title: "Tolak Pembayaran?",
+      text: "Data akan dihapus agar warga bisa kirim ulang.",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#ef4444",
+      cancelButtonColor: "#6b7280",
+      confirmButtonText: "Ya, Tolak",
+      cancelButtonText: "Batal"
+    });
+    if (!result.isConfirmed) return;
     const { error } = await supabase.from("pembayaran").delete().eq("id", id);
     if (error) return alert("Gagal tolak: " + error.message);
-    await fetchAll();
+    await fetchTransporters();
   };
 
+  // GSAP Animations
+  useEffect(() => {
+    if (!loading) {
+      gsap.from(".stat-card", { duration: 0.6, y: 30, opacity: 0, stagger: 0.1, ease: "power2.out" });
+      gsap.from(".map-container-wrapper", { duration: 0.8, y: 40, opacity: 0, delay: 0.3, ease: "power2.out" });
+    }
+  }, [loading, activeTab]);
+
   const hapusData = async (table, id) => {
-    if (!confirm("Yakin hapus data ini?")) return;
+    const result = await Swal.fire({
+      title: "Hapus Data?",
+      text: "Yakin ingin menghapus data ini secara permanen?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#ef4444",
+      cancelButtonColor: "#6b7280",
+      confirmButtonText: "Ya, Hapus",
+      cancelButtonText: "Batal"
+    });
+    if (!result.isConfirmed) return;
     const { error } = await supabase.from(table).delete().eq("id", id);
     if (error) return alert("Gagal hapus: " + error.message);
     await fetchAll();
@@ -379,6 +409,42 @@ export default function Admin() {
                         </PieChart>
                       </ResponsiveContainer>
                     )}
+                  </div>
+
+                  {/* Leaderboard Top 5 Warga */}
+                  <div className="table-container" style={{ flex: "1 1 300px" }}>
+                    <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)", display: "flex", alignItems: "center", gap: "8px" }}>
+                      🏆 Klasemen Top 5 Warga (Eco Poin)
+                    </h3>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      {[...allWarga]
+                        .map(w => ({
+                          ...w,
+                          totalPoin: (w.sampah || []).reduce((acc, s) => acc + (parseFloat(s.berat) * 10), 0) - (w.redeem_poin?.filter(r => r.status !== 'ditolak').reduce((acc, r) => acc + r.points_cost, 0) || 0)
+                        }))
+                        .filter(w => w.totalPoin > 0)
+                        .sort((a, b) => b.totalPoin - a.totalPoin)
+                        .slice(0, 5)
+                        .map((w, index) => (
+                          <div key={w.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px", background: index === 0 ? "linear-gradient(to right, #fef08a, #fef9c3)" : "#f8fafc", borderRadius: "8px", border: index === 0 ? "1px solid #fde047" : "1px solid #e2e8f0" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                              <div style={{ width: "28px", height: "28px", borderRadius: "14px", background: index === 0 ? "#eab308" : index === 1 ? "#94a3b8" : index === 2 ? "#b45309" : "#cbd5e1", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "13px" }}>
+                                {index + 1}
+                              </div>
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--color-text-main)" }}>{w.nama}</div>
+                                <div style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>{getLevelLabel(w.totalPoin).label}</div>
+                              </div>
+                            </div>
+                            <div style={{ fontWeight: 800, color: index === 0 ? "#854d0e" : "#7c3aed", fontSize: "15px" }}>
+                              {w.totalPoin} Poin
+                            </div>
+                          </div>
+                        ))}
+                      {[...allWarga].filter(w => (w.sampah || []).length > 0).length === 0 && (
+                         <div style={{ padding: "20px", textAlign: "center", color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada data poin warga.</div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
