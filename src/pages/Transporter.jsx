@@ -4,6 +4,7 @@ import Map, { parseLocation } from "../components/Map";
 import Sidebar from "../components/Sidebar";
 import TypingLoader from "../components/TypingLoader";
 import AccountSettings from "../components/AccountSettings";
+import ChatWidget from "../components/ChatWidget";
 import gsap from "gsap";
 
 export default function Transporter() {
@@ -12,6 +13,7 @@ export default function Transporter() {
   const [activeTab, setActiveTab] = useState("ruteharian");
   const [isLive, setIsLive] = useState(false);
   const [watchId, setWatchId] = useState(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const [trackingChannel, setTrackingChannel] = useState(null);
   const [selesaiModal, setSelesaiModal] = useState({ open: false, id: null, file: null, loading: false });
   const [myLocation, setMyLocation] = useState(null);
@@ -603,6 +605,20 @@ export default function Transporter() {
             </div>
           </div>
         </div>
+      )}
+
+      {myId && (
+        <>
+          <button onClick={() => setChatOpen(!chatOpen)} style={{ position: "fixed", bottom: "20px", right: "20px", width: "56px", height: "56px", borderRadius: "28px", backgroundColor: "#3b82f6", color: "#fff", border: "none", boxShadow: "0 4px 12px rgba(59, 130, 246, 0.4)", cursor: "pointer", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg style={{ width: "24px", height: "24px" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+          </button>
+          <ChatWidget
+            currentUser={{ id: myId, name: user.nama }}
+            targetUser={{ id: '00000000-0000-0000-0000-000000000000', name: 'Admin' }}
+            isOpen={chatOpen}
+            onClose={() => setChatOpen(false)}
+          />
+        </>
       )}
     </div>
   );

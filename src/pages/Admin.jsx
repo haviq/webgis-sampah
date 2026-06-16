@@ -708,23 +708,28 @@ export default function Admin() {
               </div>
             )}
 
-            {/* ── TAB: Layanan Chat Warga ── */}
+            {/* ── TAB: Layanan Chat ── */}
             {activeTab === "chat" && (
               <div className="map-container-wrapper" style={{ marginTop: 0, display: "flex", gap: "20px", height: "600px", padding: 0, overflow: "hidden" }}>
                 <div style={{ width: "300px", borderRight: "1px solid #e2e8f0", display: "flex", flexDirection: "column", background: "#f8fafc" }}>
                   <div style={{ padding: "20px", borderBottom: "1px solid #e2e8f0", background: "#fff" }}>
-                    <h3 style={{ fontSize: "16px", fontWeight: 700, margin: 0 }}>Daftar Warga</h3>
-                    <p style={{ fontSize: "12px", color: "var(--color-text-muted)", margin: "4px 0 0 0" }}>Pilih warga untuk membalas chat</p>
+                    <h3 style={{ fontSize: "16px", fontWeight: 700, margin: 0 }}>Daftar Pengguna</h3>
+                    <p style={{ fontSize: "12px", color: "var(--color-text-muted)", margin: "4px 0 0 0" }}>Pilih pengguna untuk membalas chat</p>
                   </div>
                   <div style={{ flex: 1, overflowY: "auto", padding: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {allWarga.map(w => (
+                    {[...allWarga.map(w => ({...w, _role: 'Warga'})), ...transporterList.map(t => ({...t, _role: 'Transporter'}))].map(u => (
                       <button 
-                        key={w.id} 
-                        onClick={() => setChatTarget(w)} 
-                        style={{ padding: "14px", textAlign: "left", background: chatTarget?.id === w.id ? "#ecfdf5" : "#fff", border: chatTarget?.id === w.id ? "1px solid #34d399" : "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", transition: "all 0.2s" }}
+                        key={u.id} 
+                        onClick={() => setChatTarget(u)} 
+                        style={{ padding: "14px", textAlign: "left", background: chatTarget?.id === u.id ? "#ecfdf5" : "#fff", border: chatTarget?.id === u.id ? "1px solid #34d399" : "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", transition: "all 0.2s" }}
                       >
-                        <div style={{ fontWeight: 700, color: chatTarget?.id === w.id ? "#059669" : "#1e293b", fontSize: "14px" }}>{w.nama}</div>
-                        <div style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{w.alamat}</div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontWeight: 700, color: chatTarget?.id === u.id ? "#059669" : "#1e293b", fontSize: "14px" }}>{u.nama}</span>
+                          <span style={{ fontSize: "10px", padding: "2px 6px", borderRadius: "10px", backgroundColor: u._role === 'Warga' ? '#e0f2fe' : '#fef3c7', color: u._role === 'Warga' ? '#0369a1' : '#b45309', fontWeight: 600 }}>{u._role}</span>
+                        </div>
+                        <div style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "6px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {u._role === 'Warga' ? (u.alamat || "Alamat belum diatur") : "Mitra Pengangkut Sampah"}
+                        </div>
                       </button>
                     ))}
                   </div>
@@ -742,7 +747,7 @@ export default function Admin() {
                     <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--color-text-muted)" }}>
                       <svg style={{ width: "64px", height: "64px", color: "#cbd5e1", marginBottom: "16px" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                       <div style={{ fontWeight: 600, fontSize: "16px", color: "#64748b" }}>Belum ada obrolan terpilih</div>
-                      <div style={{ fontSize: "13px", marginTop: "8px" }}>Pilih nama warga di panel sebelah kiri untuk mulai mengobrol.</div>
+                      <div style={{ fontSize: "13px", marginTop: "8px" }}>Pilih nama pengguna di panel sebelah kiri untuk mulai mengobrol.</div>
                     </div>
                   )}
                 </div>
