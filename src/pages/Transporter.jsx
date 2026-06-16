@@ -32,6 +32,7 @@ export default function Transporter() {
   const [tugas, setTugas] = useState([]);
   const [myId, setMyId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadingAction, setLoadingAction] = useState(false);
 
   const fetchAll = async (tid) => {
     setLoading(true);
@@ -102,8 +103,31 @@ export default function Transporter() {
   };
 
   const ambilTugas = async (wargaId) => {
-    const { error } = await supabase.from("pengangkutan").insert({ warga_id: wargaId, transporter_id: myId, status: "proses" });
-    if (error) return alert("Gagal mengambil tugas: " + error.message);
+    if (loadingAction) return;
+    setLoadingAction(true);
+    
+    // Cek apakah warga sudah punya request "Menunggu"
+    const { data: existing } = await supabase.from("pengangkutan").select("id").eq("warga_id", wargaId).eq("status", "Menunggu").maybeSingle();
+    
+    let err = null;
+    if (existing) {
+      // Jika ada request menunggu, UPDATE tugas tersebut agar diambil oleh Transporter ini
+      const { error } = await supabase.from("pengangkutan").update({ transporter_id: myId, status: "proses" }).eq("id", existing.id);
+      err = error;
+    } else {
+      // Jika belum ada request tapi transporter proaktif menjemput, INSERT baru
+      const { error } = await supabase.from("pengangkutan").insert({ warga_id: wargaId, transporter_id: myId, status: "proses" });
+      err = error;
+    }
+    
+    setLoadingAction(false);
+    if (err) return alert("Gagal mengambil tugas: " + err.message);
+    
+    // Broadcast status baru
+    if (trackingChannel) {
+      trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'admin', msg: `Tugas penjemputan warga telah diambil oleh transporter!` } });
+    }
+    
     alert("Tugas berhasil diambil!");
     await fetchAll(myId);
   };
@@ -311,10 +335,14 @@ export default function Transporter() {
                       </tr>
                     </thead>
                     <tbody>
-                      {allWarga.length === 0 ? (
-                        <tr><td colSpan="4" style={{ padding: "20px", textAlign: "center", color: "var(--color-text-muted)" }}>Belum ada data warga terdaftar.</td></tr>
-                      ) : (
-                        allWarga.map(w => {
+                      {(() => {
+                        const wargaBelumDiambil = allWarga.filter(w => !tugas.some(t => t.warga_id === w.id && t.status === "proses"));
+                        
+                        if (wargaBelumDiambil.length === 0) {
+                          return <tr><td colSpan="4" style={{ padding: "20px", textAlign: "center", color: "var(--color-text-muted)" }}>Tidak ada tugas penjemputan baru yang tersedia.</td></tr>;
+                        }
+
+                        return wargaBelumDiambil.map(w => {
                           const sudah = (w.pembayaran || []).some(p => p.status === "sudah");
                           return (
                             <tr key={w.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
@@ -326,13 +354,24 @@ export default function Transporter() {
                                 </span>
                               </td>
                               <td style={{ padding: "12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                                <button onClick={() => ambilTugas(w.id)} className="btn-primary" style={{ padding: "4px 10px", fontSize: "11px", width: "auto" }}>Ambil</button>
+                                <button 
+                                  disabled={loadingAction}
+                                  onClick={() => {
+                                    if (!sudah) return alert("Warga ini belum melunasi iuran retribusi! Anda tidak dapat mengambil tugas ini.");
+                                    ambilTugas(w.id);
+                                  }} 
+                                  className="btn-primary" 
+                                  style={{ padding: "4px 10px", fontSize: "11px", width: "auto", background: sudah ? "#3b82f6" : "#9ca3af", borderColor: sudah ? "#2563eb" : "#6b7280", cursor: loadingAction ? "wait" : (sudah ? "pointer" : "not-allowed"), opacity: loadingAction ? 0.6 : 1 }}
+                                  title={sudah ? "Ambil Tugas Penjemputan" : "Warga belum melunasi iuran"}
+                                >
+                                  {loadingAction ? "..." : "Ambil"}
+                                </button>
                                 <button onClick={() => openRoute(w.location)} className="btn-primary" style={{ padding: "4px 10px", fontSize: "11px", width: "auto", background: "#3b82f6", borderColor: "#2563eb" }}>Rute</button>
                               </td>
                             </tr>
                           );
-                        })
-                      )}
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>

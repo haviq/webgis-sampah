@@ -44,6 +44,7 @@ export default function Admin() {
 
   // Modal State for CRUD Edit
   const [editModal, setEditModal] = useState({ open: false, type: "", data: null });
+  const [buktiModal, setBuktiModal] = useState({ open: false, url: "" });
 
   const fetchAll = async () => {
     setLoading(true);
@@ -480,6 +481,7 @@ export default function Admin() {
                           <th style={{ padding: "10px 12px" }}>Nama Warga</th>
                           <th style={{ padding: "10px 12px" }}>Tanggal Bayar</th>
                           <th style={{ padding: "10px 12px" }}>Status</th>
+                          <th style={{ padding: "10px 12px" }}>Bukti</th>
                           <th style={{ padding: "10px 12px" }}>Aksi Verifikasi</th>
                         </tr>
                       </thead>
@@ -494,6 +496,9 @@ export default function Admin() {
                                 <td style={{ padding: "12px", color: "var(--color-text-muted)" }}>{b.tanggal ? new Date(b.tanggal).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }) : "-"}</td>
                                 <td style={{ padding: "12px" }}>
                                   <span style={{ padding: "4px 10px", borderRadius: "20px", fontSize: "12px", fontWeight: 700, backgroundColor: sc.bg, color: sc.color }}>{sc.label}</span>
+                                </td>
+                                <td style={{ padding: "12px" }}>
+                                  {b.bukti_url ? <button onClick={() => setBuktiModal({ open: true, url: b.bukti_url })} style={{ color: "#3b82f6", fontSize: "12px", textDecoration: "underline", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Lihat Bukti</button> : "-"}
                                 </td>
                                 <td style={{ padding: "12px" }}>
                                   {b.status === "belum" ? (
@@ -609,7 +614,7 @@ export default function Admin() {
                               <span style={{ padding: "3px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", backgroundColor: a.status === "selesai" ? "#dcfce7" : a.status === "proses" ? "#dbeafe" : "#fef3c7", color: a.status === "selesai" ? "#16a34a" : a.status === "proses" ? "#2563eb" : "#d97706" }}>{a.status}</span>
                             </td>
                             <td style={{ padding: "12px" }}>
-                              {a.bukti_url ? <a href={a.bukti_url} target="_blank" rel="noreferrer" style={{ color: "#3b82f6", fontSize: "12px", textDecoration: "underline" }}>Lihat Foto</a> : "-"}
+                              {a.bukti_url ? <button onClick={() => setBuktiModal({ open: true, url: a.bukti_url })} style={{ color: "#3b82f6", fontSize: "12px", textDecoration: "underline", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Lihat Foto</button> : "-"}
                             </td>
                             <td style={{ padding: "12px", display: "flex", gap: "6px", flexWrap: "wrap" }}>
                               <button onClick={() => setEditModal({ open: true, type: "pengangkutan", data: a })} className="btn-primary" style={{ padding: "4px 10px", fontSize: "11px", width: "auto", background: "#3b82f6", borderColor: "#2563eb" }}>Assign / Edit</button>
@@ -894,6 +899,22 @@ export default function Admin() {
           </div>
         )}
       </main>
+
+      {/* Modal Lihat Bukti */}
+      {buktiModal.open && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.6)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "center", padding: "20px" }} onClick={() => setBuktiModal({ open: false, url: "" })}>
+          <div style={{ position: "relative", backgroundColor: "#fff", padding: "16px", borderRadius: "12px", maxWidth: "90%", maxHeight: "90vh", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700" }}>Bukti Lampiran</h3>
+              <button onClick={() => setBuktiModal({ open: false, url: "" })} style={{ background: "#f1f5f9", border: "none", width: "30px", height: "30px", borderRadius: "50%", cursor: "pointer", fontWeight: "bold" }}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflow: "auto", display: "flex", justifyContent: "center", alignItems: "center" }}>
+              <img src={buktiModal.url} alt="Bukti" style={{ maxWidth: "100%", maxHeight: "calc(90vh - 80px)", objectFit: "contain", borderRadius: "8px" }} />
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

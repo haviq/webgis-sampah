@@ -144,6 +144,45 @@ export default function Warga() {
     await refreshHistory(wargaData.id);
   };
 
+  const submitLaporanDanRequest = async () => {
+    if (loading) return;
+    if (!wargaData) return alert("Simpan profil & lokasi rumah Anda terlebih dahulu!");
+    
+    // Check if there is already an active request
+    const hasActiveRequest = history.angkut.some(a => a.status === "Menunggu" || a.status === "proses");
+    if (hasActiveRequest) {
+      return alert("Anda sudah memiliki permintaan penjemputan yang sedang aktif! Harap tunggu sampai truk selesai menjemput.");
+    }
+
+    const statusBulanIniStatus = statusBayarBulanIni();
+    if (statusBulanIniStatus?.status !== "sudah") {
+      return alert("Anda harus melunasi retribusi kebersihan bulan ini (dan diverifikasi Admin) sebelum dapat request penjemputan sampah.");
+    }
+    setLoading(true);
+    
+    // Jika mengisi berat, masukkan ke data poin sampah
+    if (form.berat) {
+      const beratFloat = parseFloat(form.berat);
+      const { error: errSampah } = await supabase.from("sampah").insert({ warga_id: wargaData.id, jenis: form.jenis, berat: beratFloat });
+      if (errSampah) { setLoading(false); return alert("Gagal memproses poin sampah: " + errSampah.message); }
+    }
+    
+    // Insert pengangkutan (wajib)
+    const { error: errAngkut } = await supabase.from("pengangkutan").insert({ warga_id: wargaData.id, status: "Menunggu" });
+    if (errAngkut) { setLoading(false); return alert("Gagal request penjemputan: " + errAngkut.message); }
+
+    setLoading(false);
+    alert("✅ Truk penjemputan berhasil dipanggil!" + (form.berat ? " Laporan sampah & poin berhasil ditambahkan." : ""));
+
+    if (trackingChannel) {
+      trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'admin', msg: `Request penjemputan sampah baru dari warga!` } });
+      trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'transporter', msg: `Tugas jemput baru dari warga tersedia!` } });
+    }
+
+    setForm({ ...form, jenis: "Plastik & Kertas", berat: "" });
+    await refreshHistory(wargaData.id);
+  };
+
   const getBulanIni = () => new Date().toISOString().slice(0, 7);
   const statusBayarBulanIni = () => {
     const bulan = getBulanIni();
@@ -324,34 +363,70 @@ export default function Warga() {
                       </select>
                     </div>
                     <div className="form-group">
-                      <label className="form-label">Estimasi Berat (Kg)</label>
-                      <input className="form-input" type="number" step="0.1" placeholder="Contoh: 4.5" value={form.berat} onChange={e => setForm({ ...form, berat: e.target.value })} />
+                      <label className="form-label">Estimasi Berat (Kg) <span style={{fontSize: '11px', color: '#9ca3af', fontWeight: 'normal'}}>- Opsional</span></label>
+                      <input className="form-input" type="number" step="0.1" placeholder="Kosongkan jika hanya ingin memanggil truk" value={form.berat} onChange={e => setForm({ ...form, berat: e.target.value })} />
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                      <button onClick={() => { if (!form.berat) return alert("Isi berat sampah!"); addData("sampah", { jenis: form.jenis, berat: parseFloat(form.berat) }); setForm({ ...form, berat: "" }); }} className="btn-primary">
-                        Kirim Data Sampah (+{form.berat ? Math.round(parseFloat(form.berat) * 10) : 0} Poin)
-                      </button>
-                      <button onClick={() => addData("pengangkutan", { status: "menunggu" })} className="btn-primary" style={{ background: "#f59e0b", borderColor: "#d97706" }}>
-                        Request Penjemputan Sampah
-                      </button>
+                      {(() => {
+                        const hasActiveRequest = history.angkut.some(a => a.status === "Menunggu" || a.status === "proses");
+                        const isDisabled = loading || statusBulanIni?.status !== "sudah" || hasActiveRequest;
+                        
+                        return (
+                          <button 
+                            disabled={isDisabled}
+                            onClick={submitLaporanDanRequest} 
+                            className="btn-primary" 
+                            style={{ 
+                              background: hasActiveRequest ? "#6b7280" : (statusBulanIni?.status === "sudah" ? "#059669" : "#9ca3af"), 
+                              borderColor: hasActiveRequest ? "#4b5563" : (statusBulanIni?.status === "sudah" ? "#047857" : "#6b7280"), 
+                              cursor: isDisabled ? "not-allowed" : "pointer", 
+                              padding: "14px", 
+                              opacity: loading ? 0.7 : 1 
+                            }}
+                          >
+                            <div style={{ fontSize: "15px", fontWeight: "700" }}>
+                              {loading ? "Memproses..." : hasActiveRequest ? "Truk Penjemputan Sedang Dijadwalkan" : (form.berat ? `Panggil Truk & Klaim Poin (+${Math.round(parseFloat(form.berat) * 10)})` : "Panggil Truk Saja (Tanpa Poin)")}
+                            </div>
+                            {!hasActiveRequest && statusBulanIni?.status !== "sudah" && <div style={{ fontSize: "11px", marginTop: "4px" }}>(Anda Belum Lunas Iuran Bulan Ini)</div>}
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
                   <div>
-                    <h4 style={{ fontSize: "14px", fontWeight: 700, color: "var(--color-text-main)", marginBottom: "12px" }}>Riwayat Sampah Terakhir</h4>
-                    {history.sampah.length === 0
-                      ? <p style={{ color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada laporan sampah.</p>
-                      : <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        {history.sampah.slice(0, 6).map(s => (
-                          <div key={s.id} style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", backgroundColor: "#fff" }}>
-                            <span style={{ fontWeight: 500 }}>{s.jenis}</span>
-                            <div style={{ display: "flex", gap: "12px" }}>
-                              <span style={{ fontWeight: 700, color: "var(--color-primary)" }}>{s.berat} Kg</span>
-                              <span style={{ fontWeight: 600, color: "#8b5cf6" }}>+{s.berat * 10} Poin</span>
+                    <h4 style={{ fontSize: "14px", fontWeight: 700, color: "var(--color-text-main)", marginBottom: "12px" }}>Riwayat Aktivitas Terakhir</h4>
+                    {(() => {
+                      const combinedRiwayat = [
+                        ...history.sampah.map(s => ({ ...s, type: "sampah" })),
+                        ...history.angkut.filter(a => a.status === "selesai").map(a => ({ ...a, type: "angkut" }))
+                      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+                      if (combinedRiwayat.length === 0) {
+                        return <p style={{ color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada riwayat aktivitas.</p>;
+                      }
+
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                          {combinedRiwayat.slice(0, 6).map(item => (
+                            <div key={item.type + item.id} style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", backgroundColor: "#fff" }}>
+                              <span style={{ fontWeight: 500 }}>
+                                {item.type === "sampah" ? item.jenis : "Truk Selesai Mengangkut Sampah"}
+                              </span>
+                              <div style={{ display: "flex", gap: "12px" }}>
+                                {item.type === "sampah" ? (
+                                  <>
+                                    <span style={{ fontWeight: 700, color: "var(--color-primary)" }}>{item.berat} Kg</span>
+                                    <span style={{ fontWeight: 600, color: "#8b5cf6" }}>+{item.berat * 10} Poin</span>
+                                  </>
+                                ) : (
+                                  <span style={{ fontWeight: 700, color: "#10b981" }}>✓ Selesai</span>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    }
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
