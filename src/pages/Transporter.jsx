@@ -46,7 +46,23 @@ export default function Transporter() {
       const tRes = await supabase.from("pengangkutan").select("*, warga(*)").eq("transporter_id", activeId);
 
       const wargaData = wRes.data || [];
-      const tugasData = tRes.data || [];
+      
+      // Filter duplikasi: Hanya ambil tugas terbaru untuk setiap warga
+      const latestTugasMap = {};
+      (tRes.data || []).forEach(t => {
+         const existing = latestTugasMap[t.warga_id];
+         if (!existing) {
+            latestTugasMap[t.warga_id] = t;
+         } else {
+            // Prioritaskan "proses" / "Menunggu" daripada "selesai"
+            if (t.status !== "selesai" && existing.status === "selesai") {
+               latestTugasMap[t.warga_id] = t;
+            } else if (t.status === existing.status && new Date(t.created_at || 0) > new Date(existing.created_at || 0)) {
+               latestTugasMap[t.warga_id] = t;
+            }
+         }
+      });
+      const tugasData = Object.values(latestTugasMap);
 
       setAllWarga(wargaData);
       const sortedTugas = tugasData.sort((a, b) => {
@@ -413,7 +429,13 @@ export default function Transporter() {
                     </thead>
                     <tbody>
                       {(() => {
-                        const wargaBelumDiambil = allWarga.filter(w => !tugas.some(t => t.warga_id === w.id && t.status === "proses"));
+                        const wargaBelumDiambil = allWarga.filter(w => {
+                           const t = tugas.find(x => x.warga_id === w.id);
+                           if (!t) return true; // Warga baru, belum pernah ada tugas
+                           if (t.status === "proses") return false; // Sedang dijemput
+                           if (t.status === "selesai") return false; // Sudah selesai, sembunyikan sampai warga klik request lagi (status 'Menunggu')
+                           return true; // Status 'Menunggu' atau lainnya akan ditampilkan
+                        });
                         
                         if (wargaBelumDiambil.length === 0) {
                           return <tr><td colSpan="4" style={{ padding: "20px", textAlign: "center", color: "var(--color-text-muted)" }}>Tidak ada tugas penjemputan baru yang tersedia.</td></tr>;
