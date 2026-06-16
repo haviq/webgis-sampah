@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "../lib/supabase";
 
-export default function ChatWidget({ currentUser, targetUser, isOpen, onClose, isEmbedded = false }) {
+export default function ChatWidget({ currentUser, targetUser, isOpen, onClose, isEmbedded = false, isTargetOnline = false }) {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [isUploading, setIsUploading] = useState(false);
@@ -119,7 +119,13 @@ export default function ChatWidget({ currentUser, targetUser, isOpen, onClose, i
   return (
     <div style={containerStyle}>
       <div style={{ padding: "12px 16px", backgroundColor: "#10b981", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 700 }}>
-        <div>Chat {targetUser.id === '00000000-0000-0000-0000-000000000000' ? 'dengan Admin' : targetUser.name}</div>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div>Chat {targetUser.id === '00000000-0000-0000-0000-000000000000' ? 'dengan Admin' : targetUser.name}</div>
+          <div style={{ fontSize: "11px", fontWeight: 500, display: "flex", alignItems: "center", gap: "4px", marginTop: "2px", opacity: 0.9 }}>
+            <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: isTargetOnline ? "#4ade80" : "#94a3b8" }}></span>
+            {isTargetOnline ? "Online" : "Offline"}
+          </div>
+        </div>
         <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#fff", cursor: "pointer", fontSize: "16px", padding: 0 }}>✖</button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "16px", backgroundColor: "#f8fafc", display: "flex", flexDirection: "column", gap: "10px" }}>

@@ -14,6 +14,7 @@ export default function Transporter() {
   const [isLive, setIsLive] = useState(false);
   const [watchId, setWatchId] = useState(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [isAdminOnline, setIsAdminOnline] = useState(false);
   const [trackingChannel, setTrackingChannel] = useState(null);
   const [selesaiModal, setSelesaiModal] = useState({ open: false, id: null, file: null, loading: false });
   const [myLocation, setMyLocation] = useState(null);
@@ -21,6 +22,9 @@ export default function Transporter() {
   const [returnRouteCoords, setReturnRouteCoords] = useState(null);
 
   useEffect(() => {
+    let currentUser = null;
+    supabase.auth.getUser().then(({ data }) => { currentUser = data.user; });
+
     const channel = supabase.channel('tracking')
       .on('broadcast', { event: 'notif' }, (payload) => {
         if (payload.payload.role === 'transporter') {
@@ -29,7 +33,29 @@ export default function Transporter() {
       });
     channel.subscribe();
     setTrackingChannel(channel);
-    return () => { supabase.removeChannel(channel); }
+
+    const presenceChannel = supabase.channel('online_users');
+    presenceChannel.on('presence', { event: 'sync' }, () => {
+      const state = presenceChannel.presenceState();
+      let adminOnline = false;
+      for (const key in state) {
+        if (state[key][0]?.user_id === '00000000-0000-0000-0000-000000000000') {
+          adminOnline = true;
+          break;
+        }
+      }
+      setIsAdminOnline(adminOnline);
+    });
+    presenceChannel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED' && currentUser) {
+        await presenceChannel.track({ user_id: currentUser.id });
+      }
+    });
+
+    return () => { 
+      supabase.removeChannel(channel); 
+      supabase.removeChannel(presenceChannel);
+    }
   }, []);
 
   // Real data
@@ -611,12 +637,14 @@ export default function Transporter() {
         <>
           <button onClick={() => setChatOpen(!chatOpen)} style={{ position: "fixed", bottom: "20px", right: "20px", width: "56px", height: "56px", borderRadius: "28px", backgroundColor: "#3b82f6", color: "#fff", border: "none", boxShadow: "0 4px 12px rgba(59, 130, 246, 0.4)", cursor: "pointer", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <svg style={{ width: "24px", height: "24px" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+            {isAdminOnline && <span style={{ position: "absolute", top: "4px", right: "4px", width: "12px", height: "12px", backgroundColor: "#4ade80", borderRadius: "50%", border: "2px solid #3b82f6" }}></span>}
           </button>
           <ChatWidget
             currentUser={{ id: myId, name: user.nama }}
             targetUser={{ id: '00000000-0000-0000-0000-000000000000', name: 'Admin' }}
             isOpen={chatOpen}
             onClose={() => setChatOpen(false)}
+            isTargetOnline={isAdminOnline}
           />
         </>
       )}

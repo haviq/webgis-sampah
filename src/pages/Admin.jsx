@@ -19,8 +19,11 @@ export default function Admin() {
 
   const [stats, setStats] = useState({ tps: 0, transporter: 0, warga: 0, laporan: 0, menunggu: 0 });
   const [liveDrivers, setLiveDrivers] = useState({});
+  const [onlineUsers, setOnlineUsers] = useState({});
+  const [lastMessages, setLastMessages] = useState({});
 
   useEffect(() => {
+    // Tracking GPS dan Notifikasi
     const channel = supabase.channel('tracking')
       .on('broadcast', { event: 'location' }, (payload) => {
         setLiveDrivers(prev => ({ ...prev, [payload.payload.id]: payload.payload }));
@@ -32,7 +35,29 @@ export default function Admin() {
         }
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); }
+
+    // Tracking Presence (Online Status)
+    const presenceChannel = supabase.channel('online_users');
+    presenceChannel.on('presence', { event: 'sync' }, () => {
+      const state = presenceChannel.presenceState();
+      const online = {};
+      for (const key in state) {
+        if (state[key][0]?.user_id) {
+          online[state[key][0].user_id] = true;
+        }
+      }
+      setOnlineUsers(online);
+    });
+    presenceChannel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        await presenceChannel.track({ user_id: '00000000-0000-0000-0000-000000000000' });
+      }
+    });
+
+    return () => { 
+      supabase.removeChannel(channel); 
+      supabase.removeChannel(presenceChannel);
+    }
   }, []);
   const [laporan, setLaporan] = useState([]);
   const [allWarga, setAllWarga] = useState([]);
@@ -59,14 +84,15 @@ export default function Admin() {
         setUser({ id: authUser.id, nama: profile?.name || "Admin", email: authUser.email, avatar_url: profile?.avatar_url });
       }
 
-      const [wRes, tRes, sRes, bayarRes, angkutRes, rRes, katRes] = await Promise.all([
+      const [wRes, tRes, sRes, bayarRes, angkutRes, rRes, katRes, msgRes] = await Promise.all([
         supabase.from("warga").select("id, nama, alamat, location, pembayaran(status)"),
         supabase.from("profiles").select("id, name").eq("role", "transporter"),
         supabase.from("sampah").select("id, warga_id, jenis, berat, created_at, warga(nama, alamat)"),
         supabase.from("pembayaran").select("id, warga_id, status, tanggal, bukti_url, warga(nama)").order("created_at", { ascending: false }),
         supabase.from("pengangkutan").select("id, warga_id, transporter_id, status, created_at, bukti_url, warga(nama)"),
         supabase.from("redeem_poin").select("*, warga(nama)").order("created_at", { ascending: false }),
-        supabase.from("katalog_redeem").select("*").order("cost", { ascending: true })
+        supabase.from("katalog_redeem").select("*").order("cost", { ascending: true }),
+        supabase.from("chat_messages").select("sender_id, receiver_id, created_at")
       ]);
 
       setAllWarga(wRes.data || []);
@@ -76,6 +102,17 @@ export default function Admin() {
       setTransporterList(tRes.data || []);
       setRedeemList(rRes.data || []);
       setKatalogRedeem(katRes.data || []);
+
+      // Hitung last message per user
+      const lastMsgMap = {};
+      (msgRes.data || []).forEach(m => {
+        const otherId = m.sender_id === '00000000-0000-0000-0000-000000000000' ? m.receiver_id : m.sender_id;
+        const time = new Date(m.created_at).getTime();
+        if (!lastMsgMap[otherId] || time > lastMsgMap[otherId]) {
+          lastMsgMap[otherId] = time;
+        }
+      });
+      setLastMessages(lastMsgMap);
 
       // Build eco poin ranking from sampah per warga
       const poinMap = {};
@@ -717,14 +754,24 @@ export default function Admin() {
                     <p style={{ fontSize: "12px", color: "var(--color-text-muted)", margin: "4px 0 0 0" }}>Pilih pengguna untuk membalas chat</p>
                   </div>
                   <div style={{ flex: 1, overflowY: "auto", padding: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {[...allWarga.map(w => ({...w, _role: 'Warga'})), ...transporterList.map(t => ({...t, _role: 'Transporter'}))].map(u => (
+                    {[...allWarga.map(w => ({...w, _role: 'Warga'})), ...transporterList.map(t => ({...t, _role: 'Transporter', nama: t.name}))]
+                      .sort((a, b) => {
+                        const timeA = lastMessages[a.id] || 0;
+                        const timeB = lastMessages[b.id] || 0;
+                        if (timeA !== timeB) return timeB - timeA;
+                        return (a.nama || "").localeCompare(b.nama || "");
+                      })
+                      .map(u => (
                       <button 
                         key={u.id} 
                         onClick={() => setChatTarget(u)} 
                         style={{ padding: "14px", textAlign: "left", background: chatTarget?.id === u.id ? "#ecfdf5" : "#fff", border: chatTarget?.id === u.id ? "1px solid #34d399" : "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", transition: "all 0.2s" }}
                       >
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontWeight: 700, color: chatTarget?.id === u.id ? "#059669" : "#1e293b", fontSize: "14px" }}>{u.nama}</span>
+                          <span style={{ fontWeight: 700, color: chatTarget?.id === u.id ? "#059669" : "#1e293b", fontSize: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
+                            {onlineUsers[u.id] && <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#4ade80", flexShrink: 0 }}></span>}
+                            {u.nama}
+                          </span>
                           <span style={{ fontSize: "10px", padding: "2px 6px", borderRadius: "10px", backgroundColor: u._role === 'Warga' ? '#e0f2fe' : '#fef3c7', color: u._role === 'Warga' ? '#0369a1' : '#b45309', fontWeight: 600 }}>{u._role}</span>
                         </div>
                         <div style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "6px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -742,6 +789,7 @@ export default function Admin() {
                       isOpen={true} 
                       onClose={() => setChatTarget(null)} 
                       isEmbedded={true}
+                      isTargetOnline={!!onlineUsers[chatTarget.id]}
                     />
                   ) : (
                     <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--color-text-muted)" }}>
