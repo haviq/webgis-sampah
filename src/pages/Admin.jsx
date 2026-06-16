@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import Map from "../components/Map";
+import TypingLoader from "../components/TypingLoader";
+import AccountSettings from "../components/AccountSettings";
 import Sidebar from "../components/Sidebar";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import jsPDF from "jspdf";
@@ -53,8 +55,8 @@ export default function Admin() {
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (authUser) {
-        const { data: profile } = await supabase.from("profiles").select("name").eq("id", authUser.id).maybeSingle();
-        setUser({ nama: profile?.name || "Admin", email: authUser.email });
+        const { data: profile } = await supabase.from("profiles").select("*").eq("id", authUser.id).maybeSingle();
+        setUser({ id: authUser.id, nama: profile?.name || "Admin", email: authUser.email, avatar_url: profile?.avatar_url });
       }
 
       const [wRes, tRes, sRes, bayarRes, angkutRes, rRes, katRes] = await Promise.all([
@@ -123,8 +125,9 @@ export default function Admin() {
         menunggu: bayarRes.data?.filter(b => b.status === "belum").length || 0,
       });
     } catch (err) {
-      console.error("Gagal mengambil data:", err);
+      console.error(err);
     } finally {
+      await new Promise(res => setTimeout(res, 1500));
       setLoading(false);
     }
   };
@@ -307,10 +310,20 @@ export default function Admin() {
       id: "chat", label: "Pusat Bantuan (Chat)",
       icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
     },
+    {
+      id: "pengaturan", label: "Pengaturan",
+      icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+      subItems: [
+        { id: "pengaturan-aplikasi", label: "Pengaturan Aplikasi" },
+        { id: "pengaturan-keamanan", label: "Keamanan Akun" },
+        { id: "pengaturan-bantuan", label: "Bantuan & FAQ" }
+      ]
+    }
   ];
 
   return (
     <div className="dashboard-layout">
+      {loading && <TypingLoader />}
       <Sidebar user={user} role="admin" activeTab={activeTab} setActiveTab={setActiveTab} isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} menuItems={menuItems} />
       <main className="main-content">
         <div className="dashboard-header">
@@ -886,6 +899,46 @@ export default function Admin() {
                         ))}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB: Pengaturan Aplikasi ── */}
+            {activeTab === "pengaturan-aplikasi" && (
+              <div className="card-animated">
+                <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Pengaturan Aplikasi Admin</h3>
+                  <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                    <p style={{ color: "var(--color-text-muted)", fontSize: "14px", lineHeight: 1.6 }}>Konfigurasi parameter sistem (seperti biaya retribusi dasar, atau radius penjemputan) belum tersedia pada versi ini. Hubungi *developer* untuk integrasi lebih lanjut.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB: Pengaturan Keamanan ── */}
+            {activeTab === "pengaturan-keamanan" && (
+              <div className="card-animated">
+                <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                  <AccountSettings user={user} setUser={setUser} />
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB: Bantuan & FAQ ── */}
+            {activeTab === "pengaturan-bantuan" && (
+              <div className="card-animated">
+                <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Panduan & Bantuan Admin</h3>
+                  <div className="grid-2-col">
+                    <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                      <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Cara Memverifikasi Pembayaran</h4>
+                      <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>Pilih menu Verifikasi Bayar, cek bukti transfer yang dilampirkan warga, lalu klik Setujui jika valid.</p>
+                    </div>
+                    <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                      <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Manajemen Transporter</h4>
+                      <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>Gunakan menu Transporter untuk meng-assign laporan penjemputan dari warga ke *driver* truk yang sesuai.</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

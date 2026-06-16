@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import Map, { parseLocation } from "../components/Map";
 import Sidebar from "../components/Sidebar";
+import TypingLoader from "../components/TypingLoader";
+import AccountSettings from "../components/AccountSettings";
 import gsap from "gsap";
 
 export default function Transporter() {
@@ -82,8 +84,9 @@ export default function Transporter() {
         selesai: selesai + " / " + tugasData.length + " Tugas"
       });
     } catch (err) {
-      console.error("Gagal mengambil data:", err);
+      console.error(err);
     } finally {
+      await new Promise(res => setTimeout(res, 1500));
       setLoading(false);
     }
   };
@@ -92,8 +95,8 @@ export default function Transporter() {
     supabase.auth.getUser().then(async ({ data: { user: authUser } }) => {
       if (authUser) {
         setMyId(authUser.id);
-        const { data: profile } = await supabase.from("profiles").select("name").eq("id", authUser.id).maybeSingle();
-        setUser({ nama: profile?.name || "Transporter", email: authUser.email });
+        const { data: profile } = await supabase.from("profiles").select("*").eq("id", authUser.id).maybeSingle();
+        setUser({ id: authUser.id, nama: profile?.name || "Transporter", email: authUser.email, avatar_url: profile?.avatar_url });
         await fetchAll(authUser.id);
       }
     });
@@ -280,10 +283,20 @@ export default function Transporter() {
       id: "statustruk", label: "Status Truk",
       icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l2.414 2.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h4m-6 0a1 1 0 001-1m-6 0H9" /></svg>
     },
+    {
+      id: "pengaturan", label: "Pengaturan",
+      icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+      subItems: [
+        { id: "pengaturan-aplikasi", label: "Pengaturan Aplikasi" },
+        { id: "pengaturan-keamanan", label: "Keamanan Akun" },
+        { id: "pengaturan-bantuan", label: "Bantuan & FAQ" }
+      ]
+    }
   ];
 
   return (
     <div className="dashboard-layout">
+      {loading && <TypingLoader />}
       <Sidebar
         user={user}
         role="transporter"
@@ -309,10 +322,7 @@ export default function Transporter() {
           </div>
         </div>
 
-        {loading ? (
-          <div style={{ textAlign: "center", padding: "60px", color: "var(--color-text-muted)" }}>Memuat data...</div>
-        ) : (
-          <>
+        <>
             {/* TAB: Rute Harian */}
             {activeTab === "ruteharian" && (
               <>
@@ -477,6 +487,46 @@ export default function Transporter() {
               </div>
             )}
 
+            {/* ── TAB: Pengaturan Aplikasi ── */}
+            {activeTab === "pengaturan-aplikasi" && (
+              <div className="card-animated">
+                <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Pengaturan Aplikasi Truk</h3>
+                  <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                    <p style={{ color: "var(--color-text-muted)", fontSize: "14px", lineHeight: 1.6 }}>Preferensi notifikasi suara dan preferensi *routing* peta sedang dalam pengembangan.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB: Pengaturan Keamanan ── */}
+            {activeTab === "pengaturan-keamanan" && (
+              <div className="card-animated">
+                <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                  <AccountSettings user={user} setUser={setUser} />
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB: Bantuan & FAQ ── */}
+            {activeTab === "pengaturan-bantuan" && (
+              <div className="card-animated">
+                <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Panduan & Bantuan Transporter</h3>
+                  <div className="grid-2-col">
+                    <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                      <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Cara Mengambil Sampah</h4>
+                      <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>Pilih tugas dari daftar "Tugas Menunggu", lalu klik "Ambil Tugas". Ikuti rute GPS yang muncul di Peta Navigasi.</p>
+                    </div>
+                    <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                      <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Mengunggah Bukti Angkut</h4>
+                      <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>Setelah sampai di lokasi, klik tombol "Selesaikan" dan unggah foto bak sampah sebagai bukti pekerjaan telah selesai.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* TAB: Status Truk */}
             {activeTab === "statustruk" && (
               <div className="map-container-wrapper" style={{ marginTop: 0 }}>
@@ -525,8 +575,7 @@ export default function Transporter() {
                 )}
               </div>
             )}
-          </>
-        )}
+        </>
       </main>
 
       {/* MODAL SELESAI */}

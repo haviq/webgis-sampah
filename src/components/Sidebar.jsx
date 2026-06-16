@@ -1,8 +1,31 @@
+import React, { useState } from "react";
+import Swal from "sweetalert2";
 import { supabase } from "../lib/supabase";
 
 export default function Sidebar({ user, role, activeTab, setActiveTab, isCollapsed, setIsCollapsed, menuItems }) {
+  const [openMenus, setOpenMenus] = useState({});
+
+  const toggleMenu = (menuId) => {
+    setOpenMenus(prev => ({ ...prev, [menuId]: !prev[menuId] }));
+    if (isCollapsed) {
+      setIsCollapsed(false);
+    }
+  };
+
   const logout = async () => {
-    await supabase.auth.signOut();
+    const result = await Swal.fire({
+      title: 'Yakin ingin keluar?',
+      text: "Anda akan keluar dari sesi ini.",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Ya, Keluar'
+    });
+
+    if (result.isConfirmed) {
+      await supabase.auth.signOut();
+    }
   };
 
   const getSidebarBrandIcon = () => {
@@ -82,63 +105,123 @@ export default function Sidebar({ user, role, activeTab, setActiveTab, isCollaps
 
       {/* Navigation Menu */}
       <ul style={{ listStyle: "none", padding: 0, margin: 0, flex: 1 }}>
-        {menuItems.map((item) => (
-          <li
-            key={item.id}
-            onClick={() => {
-              setActiveTab(item.id);
-              if (window.innerWidth <= 768) {
-                setIsCollapsed(true);
-              }
-            }}
-            title={isCollapsed ? item.label : ""}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: isCollapsed ? 0 : "10px",
-              justifyContent: isCollapsed ? "center" : "flex-start",
-              padding: isCollapsed ? "10px" : "10px 12px",
-              borderRadius: "6px",
-              marginBottom: "4px",
-              cursor: "pointer",
-              fontSize: "14px",
-              fontWeight: 500,
-              color: activeTab === item.id ? "#ffffff" : "#94a3b8",
-              backgroundColor: activeTab === item.id ? "var(--color-primary)" : "transparent",
-              transition: "background-color 0.15s ease, color 0.15s ease",
-            }}
-            onMouseEnter={e => {
-              if (activeTab !== item.id) {
-                e.currentTarget.style.backgroundColor = "#1e293b";
-                e.currentTarget.style.color = "#ffffff";
-              }
-            }}
-            onMouseLeave={e => {
-              if (activeTab !== item.id) {
-                e.currentTarget.style.backgroundColor = "transparent";
-                e.currentTarget.style.color = "#94a3b8";
-              }
-            }}
-          >
-            {/* Icon */}
-            <span style={{
-              display: "flex",
-              alignItems: "center",
-              flexShrink: 0,
-              width: "18px",
-              height: "18px",
-              color: "inherit",
-            }}>
-              {item.icon}
-            </span>
-            {/* Label */}
-            {!isCollapsed && (
-              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {item.label}
-              </span>
-            )}
-          </li>
-        ))}
+        {menuItems.map((item) => {
+          const hasSubItems = item.subItems && item.subItems.length > 0;
+          const isOpen = openMenus[item.id];
+          const isParentActive = activeTab === item.id || (hasSubItems && item.subItems.some(sub => activeTab === sub.id));
+
+          return (
+            <React.Fragment key={item.id}>
+              <li
+                onClick={() => {
+                  if (hasSubItems) {
+                    toggleMenu(item.id);
+                  } else {
+                    setActiveTab(item.id);
+                    if (window.innerWidth <= 768) {
+                      setIsCollapsed(true);
+                    }
+                  }
+                }}
+                title={isCollapsed ? item.label : ""}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: isCollapsed ? 0 : "10px",
+                  justifyContent: isCollapsed ? "center" : "flex-start",
+                  padding: isCollapsed ? "10px" : "10px 12px",
+                  borderRadius: "6px",
+                  marginBottom: "4px",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                  fontWeight: 500,
+                  color: isParentActive ? "#ffffff" : "#94a3b8",
+                  backgroundColor: isParentActive ? "var(--color-primary)" : "transparent",
+                  transition: "background-color 0.15s ease, color 0.15s ease",
+                }}
+                onMouseEnter={e => {
+                  if (!isParentActive) {
+                    e.currentTarget.style.backgroundColor = "#1e293b";
+                    e.currentTarget.style.color = "#ffffff";
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!isParentActive) {
+                    e.currentTarget.style.backgroundColor = "transparent";
+                    e.currentTarget.style.color = "#94a3b8";
+                  }
+                }}
+              >
+                {/* Icon */}
+                <span style={{
+                  display: "flex",
+                  alignItems: "center",
+                  flexShrink: 0,
+                  width: "18px",
+                  height: "18px",
+                  color: "inherit",
+                }}>
+                  {item.icon}
+                </span>
+                {/* Label */}
+                {!isCollapsed && (
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
+                    {item.label}
+                  </span>
+                )}
+                {/* Chevron */}
+                {!isCollapsed && hasSubItems && (
+                  <span style={{ 
+                    transition: "transform 0.2s", 
+                    transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+                    display: "flex"
+                  }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </span>
+                )}
+              </li>
+
+              {/* Render subItems */}
+              {!isCollapsed && hasSubItems && isOpen && (
+                <ul style={{ listStyle: "none", padding: "0 0 0 34px", margin: "4px 0 8px 0" }}>
+                  {item.subItems.map(sub => (
+                    <li
+                      key={sub.id}
+                      onClick={() => {
+                        setActiveTab(sub.id);
+                        if (window.innerWidth <= 768) setIsCollapsed(true);
+                      }}
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: "13px",
+                        cursor: "pointer",
+                        borderRadius: "6px",
+                        color: activeTab === sub.id ? "#ffffff" : "#94a3b8",
+                        backgroundColor: activeTab === sub.id ? "rgba(30, 41, 59, 0.8)" : "transparent",
+                        transition: "all 0.15s",
+                        marginBottom: "2px"
+                      }}
+                      onMouseEnter={e => {
+                        if (activeTab !== sub.id) {
+                          e.currentTarget.style.color = "#ffffff";
+                          e.currentTarget.style.backgroundColor = "rgba(30, 41, 59, 0.5)";
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (activeTab !== sub.id) {
+                          e.currentTarget.style.color = "#94a3b8";
+                          e.currentTarget.style.backgroundColor = "transparent";
+                        }
+                      }}
+                    >
+                      {sub.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </React.Fragment>
+          );
+        })}
       </ul>
 
       {/* Footer: user info + logout */}
@@ -164,8 +247,13 @@ export default function Sidebar({ user, role, activeTab, setActiveTab, isCollaps
             fontSize: "13px",
             color: "#ffffff",
             flexShrink: 0,
+            overflow: "hidden",
           }}>
-            {(user?.nama || user?.name || "?").charAt(0).toUpperCase()}
+            {user?.avatar_url ? (
+              <img src={user.avatar_url} alt="Avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            ) : (
+              (user?.nama || user?.name || "?").charAt(0).toUpperCase()
+            )}
           </div>
           {!isCollapsed && (
             <div style={{ overflow: "hidden" }}>
