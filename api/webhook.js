@@ -14,13 +14,16 @@ export default async function handler(req, res) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const notificationJson = req.body; // In Next.js/Vercel, req.body is already parsed JSON if Content-Type is json
-    const orderId = req.query.order_id;
+    let notificationJson = req.body;
+    if (typeof notificationJson === 'string') {
+      try { notificationJson = JSON.parse(notificationJson); } catch (e) { }
+    }
 
-    let transactionStatus = notificationJson.status;
+    const orderId = req.query.order_id;
+    let transactionStatus = notificationJson?.status;
 
     if (!orderId) {
-      return res.status(400).json({ error: "order_id is missing from query string" });
+      return res.status(400).json({ error: "order_id is missing from query string", body: notificationJson });
     }
 
     if (transactionStatus === 'paid') {
