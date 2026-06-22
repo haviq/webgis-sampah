@@ -340,11 +340,11 @@ export default function Warga() {
         .from("pembayaran")
         .insert([{
           warga_id: wargaData.id,
-          bulan: bulanIni,
-          tahun: tahunIni.toString(),
-          jumlah: finalNominal,
           status: "belum",
-          bukti_url: "manual"
+          tanggal: new Date().toISOString().split("T")[0],
+          bukti_url: "manual",
+          jumlah: finalNominal,
+          keterangan: "Pembayaran Manual Retribusi Bulan " + new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" })
         }]);
       
       if (insertError) throw insertError;
