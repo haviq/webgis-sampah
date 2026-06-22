@@ -21,53 +21,55 @@ function apiPlugin() {
               const parsedBody = JSON.parse(body);
               const { orderId, grossAmount, customerName, customerEmail } = parsedBody;
 
-              const snap = new midtransClient.Snap({
-                isProduction: false,
-                serverKey: process.env.MIDTRANS_SERVER_KEY,
-                clientKey: process.env.VITE_MIDTRANS_CLIENT_KEY
+              const data = JSON.stringify({
+                amount: parseInt(grossAmount, 10),
+                description: "Pembayaran Retribusi WebGIS Sampah",
+                payment_url: "https://www.bayar.gg/pay",
+                callback_url: `https://webgis.haviq.dev/api/webhook?order_id=${orderId}`
               });
 
-              const parameter = {
-                transaction_details: {
-                  order_id: orderId,
-                  gross_amount: parseInt(grossAmount, 10)
+              const response = await fetch('https://www.bayar.gg/api/create-payment.php', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-API-Key': process.env.BAYARGG_API_KEY
                 },
-                customer_details: {
-                  first_name: customerName,
-                  email: customerEmail || 'warga@example.com'
-                }
-              };
+                body: data
+              });
+              
+              const json = await response.json();
 
-              const transaction = await snap.createTransaction(parameter);
-              res.statusCode = 200;
-              res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ token: transaction.token }));
+              if (json.success) {
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ paymentUrl: json.data.payment_url, token: json.data.invoice_id }));
+              } else {
+                throw new Error(json.error || "Gagal menghubungi bayar.gg");
+              }
             } catch (error) {
-              console.error("Midtrans Error:", error);
+              console.error("Bayar.gg Error:", error);
               res.statusCode = 500;
               res.setHeader('Content-Type', 'application/json');
               res.end(JSON.stringify({ error: error.message }));
             }
           });
-        } else if (req.url === '/api/webhook' && req.method === 'POST') {
+        } else if (req.url.startsWith('/api/webhook') && req.method === 'POST') {
           let body = '';
           req.on('data', chunk => {
             body += chunk.toString();
           });
           req.on('end', async () => {
             try {
+              // Bayar.gg sends form-urlencoded data, NOT JSON. Wait, the docs said JSON?
+              // "Format Data: JSON"
               const notificationJson = JSON.parse(body);
-              const apiClient = new midtransClient.Snap({
-                isProduction: false,
-                serverKey: process.env.MIDTRANS_SERVER_KEY,
-                clientKey: process.env.VITE_MIDTRANS_CLIENT_KEY
-              });
-
-              const statusResponse = await apiClient.transaction.notification(notificationJson);
               
-              let orderId = statusResponse.order_id;
-              let transactionStatus = statusResponse.transaction_status;
-              let fraudStatus = statusResponse.fraud_status;
+              // Extract order_id from query parameter
+              const urlParams = new URLSearchParams(req.url.split('?')[1]);
+              const orderId = urlParams.get('order_id');
+
+              let transactionStatus = notificationJson.status;
+              let invoiceId = notificationJson.invoice_id;
 
               // Since we're in vite, we dynamically import supabase client to use here
               const { createClient } = await import('@supabase/supabase-js');
@@ -81,17 +83,15 @@ function apiPlugin() {
 
               const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-              if (transactionStatus === 'capture' || transactionStatus === 'settlement') {
-                  if (fraudStatus === 'accept' || !fraudStatus) {
-                      await supabase.from("pembayaran").update({ status: "sudah" }).eq("id", orderId);
-                  }
-              } else if (transactionStatus === 'cancel' || transactionStatus === 'deny' || transactionStatus === 'expire') {
+              if (orderId && transactionStatus === 'paid') {
+                  await supabase.from("pembayaran").update({ status: "sudah" }).eq("id", orderId);
+              } else if (orderId && (transactionStatus === 'expired' || transactionStatus === 'failed' || transactionStatus === 'canceled')) {
                   await supabase.from("pembayaran").update({ status: "gagal" }).eq("id", orderId);
               }
               
               res.statusCode = 200;
               res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ status: "OK" }));
+              res.end(JSON.stringify({ status: "OK", received: true }));
             } catch (error) {
               console.error("Webhook Error:", error);
               res.statusCode = 500;
@@ -99,7 +99,7 @@ function apiPlugin() {
               res.end(JSON.stringify({ error: error.message }));
             }
           });
-        } else if ((req.url === '/api/charge' || req.url === '/api/webhook') && req.method === 'OPTIONS') {
+        } else if ((req.url.startsWith('/api/charge') || req.url.startsWith('/api/webhook')) && req.method === 'OPTIONS') {
           res.statusCode = 200;
           res.end();
         } else {

@@ -311,34 +311,17 @@ export default function Warga() {
           customerEmail: user.email
         })
       });
-
       const resData = await response.json();
       if (!response.ok) {
         await supabase.from("pembayaran").delete().eq("id", newBayar.id);
-        throw new Error(resData.error || "Gagal memanggil Midtrans Gateway");
+        throw new Error(resData.error || "Gagal memanggil API Pembayaran");
       }
 
-      // Buka popup Midtrans Snap
-      window.snap.pay(resData.token, {
-        onSuccess: function(result){
-          alert("Pembayaran berhasil!");
-          setTimeout(() => refreshHistory(wargaData.id), 2000);
-        },
-        onPending: function(result){
-          alert("Menunggu penyelesaian pembayaran Anda!");
-          refreshHistory(wargaData.id);
-        },
-        onError: async function(result){
-          await supabase.from("pembayaran").delete().eq("id", newBayar.id);
-          alert("Pembayaran gagal!");
-          refreshHistory(wargaData.id);
-        },
-        onClose: async function(){
-          // Jika popup ditutup sebelum bayar, hapus dari database agar warga bisa klik bayar lagi
-          await supabase.from("pembayaran").delete().eq("id", newBayar.id);
-          refreshHistory(wargaData.id);
-        }
-      });
+      // Simpan URL Pembayaran bayar.gg ke database di kolom bukti_url
+      await supabase.from("pembayaran").update({ bukti_url: resData.paymentUrl }).eq("id", newBayar.id);
+
+      alert("Membuka halaman pembayaran bayar.gg di tab baru... Silakan selesaikan pembayaran di sana. Halaman ini akan otomatis diperbarui setelah pembayaran lunas!");
+      window.open(resData.paymentUrl, '_blank');
 
     } catch (err) {
       alert("Gagal proses pembayaran: " + err.message);
@@ -437,7 +420,7 @@ export default function Warga() {
 
   const statusColor = (s) => {
     if (s === "sudah") return { bg: "#dcfce7", color: "#16a34a", label: "✓ Lunas" };
-    if (s === "belum") return { bg: "#fef3c7", color: "#d97706", label: "⏳ Menunggu Verifikasi" };
+    if (s === "belum") return { bg: "#fef3c7", color: "#d97706", label: "⏳ Menunggu Pembayaran" };
     return { bg: "#fee2e2", color: "#dc2626", label: "✗ Belum Bayar" };
   };
 
@@ -783,13 +766,29 @@ export default function Warga() {
                     </div>
                     <div style={{ fontSize: "12px", opacity: 0.75, marginTop: "6px" }}>
                       {new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" })}
-                      {statusBulanIni?.status === "belum" && " — Menunggu konfirmasi Admin"}
+                      {statusBulanIni?.status === "belum" && " — Selesaikan pembayaran Anda"}
                       {statusBulanIni?.status === "sudah" && " — Telah diverifikasi Admin ✓"}
                     </div>
                   </div>
                   {statusBulanIni?.status === "belum" && (
-                    <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: "8px", padding: "10px 16px", fontSize: "13px", fontWeight: 600 }}>
-                      ⏳ Menunggu Admin
+                    <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                      <button onClick={() => {
+                        if (!statusBulanIni.bukti_url) {
+                           alert("Maaf, tagihan ini dibuat sebelum sistem diupdate sehingga tidak bisa dilanjutkan. Silakan klik tombol 'Batalkan', lalu buat tagihan baru.");
+                           return;
+                        }
+                        window.open(statusBulanIni.bukti_url, '_blank');
+                      }} style={{ background: "#fff", color: "#b45309", padding: "8px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", border: "none", cursor: "pointer" }}>
+                        Lanjutkan Pembayaran
+                      </button>
+                      <button onClick={async () => {
+                        if(window.confirm("Batalkan pembayaran ini? Anda akan harus membuat tagihan baru.")) {
+                          await supabase.from("pembayaran").delete().eq("id", statusBulanIni.id);
+                          refreshHistory(wargaData.id);
+                        }
+                      }} style={{ background: "rgba(255,255,255,0.2)", color: "#fff", padding: "8px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", border: "1px solid rgba(255,255,255,0.5)", cursor: "pointer" }}>
+                        Batalkan
+                      </button>
                     </div>
                   )}
                 </div>
@@ -815,13 +814,13 @@ export default function Warga() {
                     </div>
 
                     <div style={{ display: "flex", flexDirection: "column", gap: "12px", alignItems: "center", backgroundColor: "#f8fafc", padding: "20px", borderRadius: "12px", border: "1px dashed #cbd5e1" }}>
-                      <p style={{ margin: 0, color: "var(--color-text-main)", textAlign: "center", fontSize: "14px" }}>Pembayaran akan diproses secara aman menggunakan <strong>Midtrans</strong>.</p>
+                      <p style={{ margin: 0, color: "var(--color-text-main)", textAlign: "center", fontSize: "14px" }}>Pembayaran akan diproses secara aman menggunakan <strong>Bayar.gg</strong>.</p>
                       <div className="form-group" style={{ width: "100%", maxWidth: "300px" }}>
                         <label className="form-label" style={{ textAlign: "center" }}>Ubah Nominal Pembayaran (Bila perlu)</label>
                         <input type="number" placeholder={`Contoh: ${totalBiaya}`} value={nominalTransfer} onChange={(e) => setNominalTransfer(e.target.value)} className="form-input" style={{ padding: "8px" }} />
                       </div>
                       <button onClick={bayarRetribusi} disabled={payLoading} className="btn-primary" style={{ maxWidth: "300px" }}>
-                        {payLoading ? "Memproses..." : "Bayar dengan Midtrans"}
+                        {payLoading ? "Memproses..." : "Bayar dengan Bayar.gg"}
                       </button>
                     </div>
                   </div>

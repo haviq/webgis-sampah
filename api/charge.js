@@ -17,27 +17,31 @@ export default async function handler(req, res) {
   try {
     const { orderId, grossAmount, customerName, customerEmail } = req.body;
 
-    const snap = new midtransClient.Snap({
-      isProduction: false,
-      serverKey: process.env.MIDTRANS_SERVER_KEY,
-      clientKey: process.env.VITE_MIDTRANS_CLIENT_KEY
+    const data = JSON.stringify({
+      amount: parseInt(grossAmount, 10),
+      description: "Pembayaran Retribusi WebGIS Sampah",
+      payment_url: "https://www.bayar.gg/pay",
+      callback_url: `https://webgis.haviq.dev/api/webhook?order_id=${orderId}`
     });
 
-    const parameter = {
-      transaction_details: {
-        order_id: orderId,
-        gross_amount: parseInt(grossAmount, 10)
+    const response = await fetch('https://www.bayar.gg/api/create-payment.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': process.env.BAYARGG_API_KEY
       },
-      customer_details: {
-        first_name: customerName,
-        email: customerEmail || 'warga@example.com'
-      }
-    };
+      body: data
+    });
+    
+    const json = await response.json();
 
-    const transaction = await snap.createTransaction(parameter);
-    res.status(200).json({ token: transaction.token });
+    if (json.success) {
+      res.status(200).json({ paymentUrl: json.data.payment_url, token: json.data.invoice_id });
+    } else {
+      throw new Error(json.error || "Gagal menghubungi bayar.gg");
+    }
   } catch (error) {
-    console.error("Midtrans Error:", error);
+    console.error("Bayar.gg Error:", error);
     res.status(500).json({ error: error.message });
   }
 }
