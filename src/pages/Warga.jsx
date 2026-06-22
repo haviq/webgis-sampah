@@ -330,6 +330,34 @@ export default function Warga() {
     }
   };
 
+  const bayarManual = async () => {
+    if (payLoading) return;
+    setPayLoading(true);
+    try {
+      const finalNominal = nominalTransfer ? parseInt(nominalTransfer, 10) : totalBiaya;
+
+      const { error: insertError } = await supabase
+        .from("pembayaran")
+        .insert([{
+          warga_id: wargaData.id,
+          bulan: bulanIni,
+          tahun: tahunIni.toString(),
+          jumlah: finalNominal,
+          status: "belum",
+          bukti_url: "manual"
+        }]);
+      
+      if (insertError) throw insertError;
+      
+      alert("Pembayaran manual berhasil diajukan! Menunggu verifikasi admin.");
+      refreshHistory(wargaData.id);
+    } catch (err) {
+      alert("Gagal mengajukan pembayaran manual: " + err.message);
+    } finally {
+      setPayLoading(false);
+    }
+  };
+
   const statusBulanIni = statusBayarBulanIni();
 
   // Kalkulasi Biaya Berdasarkan Jarak
@@ -772,15 +800,21 @@ export default function Warga() {
                   </div>
                   {statusBulanIni?.status === "belum" && (
                     <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                      <button onClick={() => {
-                        if (!statusBulanIni.bukti_url) {
-                           alert("Maaf, tagihan ini dibuat sebelum sistem diupdate sehingga tidak bisa dilanjutkan. Silakan klik tombol 'Batalkan', lalu buat tagihan baru.");
-                           return;
-                        }
-                        window.open(statusBulanIni.bukti_url, '_blank');
-                      }} style={{ background: "#fff", color: "#b45309", padding: "8px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", border: "none", cursor: "pointer" }}>
-                        Lanjutkan Pembayaran
-                      </button>
+                      {statusBulanIni?.bukti_url !== "manual" ? (
+                        <button onClick={() => {
+                          if (!statusBulanIni.bukti_url) {
+                             alert("Maaf, tagihan ini dibuat sebelum sistem diupdate sehingga tidak bisa dilanjutkan. Silakan klik tombol 'Batalkan', lalu buat tagihan baru.");
+                             return;
+                          }
+                          window.open(statusBulanIni.bukti_url, '_blank');
+                        }} style={{ background: "#fff", color: "#b45309", padding: "8px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", border: "none", cursor: "pointer" }}>
+                          Lanjutkan Pembayaran
+                        </button>
+                      ) : (
+                        <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: "8px", padding: "8px 16px", fontSize: "13px", fontWeight: 600 }}>
+                          ⏳ Menunggu Admin
+                        </div>
+                      )}
                       <button onClick={async () => {
                         if(window.confirm("Batalkan pembayaran ini? Anda akan harus membuat tagihan baru.")) {
                           await supabase.from("pembayaran").delete().eq("id", statusBulanIni.id);
@@ -819,9 +853,14 @@ export default function Warga() {
                         <label className="form-label" style={{ textAlign: "center" }}>Ubah Nominal Pembayaran (Bila perlu)</label>
                         <input type="number" placeholder={`Contoh: ${totalBiaya}`} value={nominalTransfer} onChange={(e) => setNominalTransfer(e.target.value)} className="form-input" style={{ padding: "8px" }} />
                       </div>
-                      <button onClick={bayarRetribusi} disabled={payLoading} className="btn-primary" style={{ maxWidth: "300px" }}>
-                        {payLoading ? "Memproses..." : "Bayar dengan Bayar.gg"}
-                      </button>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%", maxWidth: "300px" }}>
+                        <button onClick={bayarRetribusi} disabled={payLoading} className="btn-primary" style={{ width: "100%" }}>
+                          {payLoading ? "Memproses..." : "Bayar dengan Bayar.gg"}
+                        </button>
+                        <button onClick={bayarManual} disabled={payLoading} style={{ background: "#e2e8f0", color: "#475569", padding: "10px 16px", borderRadius: "8px", fontSize: "14px", fontWeight: "bold", border: "none", cursor: "pointer", width: "100%" }}>
+                          {payLoading ? "Memproses..." : "Bayar Manual (Konfirmasi Admin)"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}

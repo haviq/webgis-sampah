@@ -22,12 +22,15 @@ export default async function handler(req, res) {
     const orderId = req.query.order_id;
     let transactionStatus = notificationJson?.status;
 
+    console.log("Webhook received! OrderId:", orderId, "Status:", transactionStatus, "Payload:", JSON.stringify(notificationJson));
+
     if (!orderId) {
       return res.status(400).json({ error: "order_id is missing from query string", body: notificationJson });
     }
 
     if (transactionStatus === 'paid') {
-      await supabase.from("pembayaran").update({ status: "sudah" }).eq("id", orderId);
+      const { data, error } = await supabase.from("pembayaran").update({ status: "sudah" }).eq("id", orderId).select();
+      console.log("Supabase Update Result:", data, error);
     } else if (transactionStatus === 'expired' || transactionStatus === 'failed' || transactionStatus === 'canceled') {
       await supabase.from("pembayaran").update({ status: "gagal" }).eq("id", orderId);
     }
