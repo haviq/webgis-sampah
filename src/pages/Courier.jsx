@@ -7,8 +7,8 @@ import AccountSettings from "../components/AccountSettings";
 import ChatWidget from "../components/ChatWidget";
 import gsap from "gsap";
 
-export default function Transporter() {
-  const [user, setUser] = useState({ nama: "Transporter", email: "" });
+export default function Courier() {
+  const [user, setUser] = useState({ nama: "Courier", email: "" });
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState("ruteharian");
   const [isLive, setIsLive] = useState(false);
@@ -20,6 +20,7 @@ export default function Transporter() {
   const [myLocation, setMyLocation] = useState(null);
   const [routeCoords, setRouteCoords] = useState(null);
   const [returnRouteCoords, setReturnRouteCoords] = useState(null);
+  const [pendapatanHistory, setPendapatanHistory] = useState([]);
 
   useEffect(() => {
     let currentUser = null;
@@ -27,7 +28,7 @@ export default function Transporter() {
 
     const channel = supabase.channel('tracking')
       .on('broadcast', { event: 'notif' }, (payload) => {
-        if (payload.payload.role === 'transporter') {
+        if (payload.payload.role === 'Courier') {
           alert("NOTIFIKASI BARU:\n" + payload.payload.msg);
         }
       });
@@ -67,12 +68,12 @@ export default function Transporter() {
   const [loading, setLoading] = useState(true);
   const [loadingAction, setLoadingAction] = useState(false);
 
-  const fetchAll = async (tid) => {
-    setLoading(true);
+  const fetchAll = async (tid, isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
       const activeId = tid || myId;
 
-      const wRes = await supabase.from("warga").select("*, pembayaran(status)");
+      const wRes = await supabase.from("warga").select("*, pembayaran(status), pengangkutan(id, status, created_at)");
       const tRes = await supabase.from("pengangkutan").select("*, warga(*)").eq("transporter_id", activeId);
 
       const wargaData = wRes.data || [];
@@ -104,6 +105,9 @@ export default function Transporter() {
       });
       setTugas(sortedTugas);
 
+      const pRes = await supabase.from("transaksi_courier").select("*").eq("courier_id", activeId).order("tanggal", { ascending: false });
+      setPendapatanHistory(pRes.data || []);
+
       const selesai = tugasData.filter(t => t.status === "selesai").length;
       setStats({
         rute: tugasData.length,
@@ -114,20 +118,25 @@ export default function Transporter() {
     } catch (err) {
       console.error(err);
     } finally {
-      await new Promise(res => setTimeout(res, 1500));
-      setLoading(false);
+      if (!isBackground) {
+        await new Promise(res => setTimeout(res, 1500));
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
+    let interval;
     supabase.auth.getUser().then(async ({ data: { user: authUser } }) => {
       if (authUser) {
         setMyId(authUser.id);
         const { data: profile } = await supabase.from("profiles").select("*").eq("id", authUser.id).maybeSingle();
-        setUser({ id: authUser.id, nama: profile?.name || "Transporter", email: authUser.email, avatar_url: profile?.avatar_url });
+        setUser({ id: authUser.id, nama: profile?.name || "Courier", email: authUser.email, avatar_url: profile?.avatar_url });
         await fetchAll(authUser.id);
+        interval = setInterval(() => fetchAll(authUser.id, true), 3000);
       }
     });
+    return () => { if (interval) clearInterval(interval); };
   }, []);
 
   // GSAP Animations
@@ -160,8 +169,16 @@ export default function Transporter() {
     if (status === "selesai") {
       const t = tugas.find(x => x.id === id);
       if (t && trackingChannel) {
-        trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'warga', target_id: t.warga_id, msg: `Truk Transporter telah mengangkut sampah Anda!` } });
+        trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'warga', target_id: t.warga_id, msg: `Truk Courier telah mengangkut sampah Anda!` } });
       }
+      
+      // Catat pendapatan
+      await supabase.from("transaksi_courier").insert({
+        courier_id: myId,
+        pengangkutan_id: id,
+        jumlah: 15000,
+        keterangan: "Fee penjemputan sampah"
+      });
     }
     
     await fetchAll(myId);
@@ -176,11 +193,11 @@ export default function Transporter() {
     
     let err = null;
     if (existing) {
-      // Jika ada request menunggu, UPDATE tugas tersebut agar diambil oleh Transporter ini
+      // Jika ada request menunggu, UPDATE tugas tersebut agar diambil oleh Courier ini
       const { error } = await supabase.from("pengangkutan").update({ transporter_id: myId, status: "proses" }).eq("id", existing.id);
       err = error;
     } else {
-      // Jika belum ada request tapi transporter proaktif menjemput, INSERT baru
+      // Jika belum ada request tapi Courier proaktif menjemput, INSERT baru
       const { error } = await supabase.from("pengangkutan").insert({ warga_id: wargaId, transporter_id: myId, status: "proses" });
       err = error;
     }
@@ -190,7 +207,7 @@ export default function Transporter() {
     
     // Broadcast status baru
     if (trackingChannel) {
-      trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'admin', msg: `Tugas penjemputan warga telah diambil oleh transporter!` } });
+      trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'admin', msg: `Tugas penjemputan warga telah diambil oleh Courier!` } });
     }
     
     alert("Tugas berhasil diambil!");
@@ -312,6 +329,10 @@ export default function Transporter() {
       icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l2.414 2.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h4m-6 0a1 1 0 001-1m-6 0H9" /></svg>
     },
     {
+      id: "pendapatan", label: "Pendapatan",
+      icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+    },
+    {
       id: "pengaturan", label: "Pengaturan",
       icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
       subItems: [
@@ -327,7 +348,7 @@ export default function Transporter() {
       {loading && <TypingLoader />}
       <Sidebar
         user={user}
-        role="transporter"
+        role="Courier"
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         isCollapsed={isCollapsed}
@@ -346,7 +367,7 @@ export default function Transporter() {
               <svg style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89" /></svg>
               Refresh
             </button>
-            <span className="badge-role" style={{ backgroundColor: "#fffbeb", color: "#d97706", borderColor: "#fde68a" }}>TRANSPORTER</span>
+            <span className="badge-role" style={{ backgroundColor: "#fffbeb", color: "#d97706", borderColor: "#fde68a" }}>Courier</span>
           </div>
         </div>
 
@@ -468,11 +489,18 @@ export default function Transporter() {
                     <tbody>
                       {(() => {
                         const wargaBelumDiambil = allWarga.filter(w => {
-                           const t = tugas.find(x => x.warga_id === w.id);
-                           if (!t) return true; // Warga baru, belum pernah ada tugas
-                           if (t.status === "proses") return false; // Sedang dijemput
-                           if (t.status === "selesai") return false; // Sudah selesai, sembunyikan sampai warga klik request lagi (status 'Menunggu')
-                           return true; // Status 'Menunggu' atau lainnya akan ditampilkan
+                           // Ambil semua riwayat pengangkutan warga dari seluruh Courier
+                           const historiPengangkutan = w.pengangkutan || [];
+                           if (historiPengangkutan.length === 0) return true; // Warga baru, belum pernah diangkut sama sekali
+                           
+                           // Cari status pengangkutan terbaru
+                           historiPengangkutan.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+                           const terbaru = historiPengangkutan[0];
+                           
+                           if (terbaru.status === "proses") return false; // Sedang dijemput oleh seseorang
+                           if (terbaru.status === "selesai") return false; // Sudah selesai dijemput, tunggu sampai request 'Menunggu' lagi
+                           
+                           return true; // Status 'Menunggu' atau lainnya
                         });
                         
                         if (wargaBelumDiambil.length === 0) {
@@ -540,7 +568,7 @@ export default function Transporter() {
             {activeTab === "pengaturan-bantuan" && (
               <div className="card-animated">
                 <div className="map-container-wrapper" style={{ marginTop: 0 }}>
-                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Panduan & Bantuan Transporter</h3>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Panduan & Bantuan Courier</h3>
                   <div className="grid-2-col">
                     <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                       <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Cara Mengambil Sampah</h4>
@@ -603,6 +631,42 @@ export default function Transporter() {
                 )}
               </div>
             )}
+
+            {/* TAB: Pendapatan */}
+            {activeTab === "pendapatan" && (
+              <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text-main)" }}>Riwayat Pendapatan</h3>
+                  <div style={{ background: "#059669", color: "#fff", padding: "8px 16px", borderRadius: "8px", fontWeight: 700, fontSize: "14px" }}>
+                    Total Pendapatan: Rp {pendapatanHistory.reduce((acc, p) => acc + (p.jumlah || 0), 0).toLocaleString("id-ID")}
+                  </div>
+                </div>
+                {pendapatanHistory.length === 0 ? (
+                  <p style={{ color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada riwayat pendapatan.</p>
+                ) : (
+                  <div className="table-container">
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid #e2e8f0", color: "var(--color-text-muted)", textAlign: "left" }}>
+                          <th style={{ padding: "10px 12px", fontWeight: 600 }}>Tanggal</th>
+                          <th style={{ padding: "10px 12px", fontWeight: 600 }}>Keterangan</th>
+                          <th style={{ padding: "10px 12px", fontWeight: 600 }}>Jumlah</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pendapatanHistory.map(p => (
+                          <tr key={p.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                            <td style={{ padding: "12px", color: "var(--color-text-muted)" }}>{new Date(p.tanggal).toLocaleDateString("id-ID", { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                            <td style={{ padding: "12px", fontWeight: 600 }}>{p.keterangan || "-"}</td>
+                            <td style={{ padding: "12px", color: "#059669", fontWeight: 700 }}>+ Rp {(p.jumlah || 0).toLocaleString("id-ID")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
         </>
       </main>
 
@@ -651,3 +715,5 @@ export default function Transporter() {
     </div>
   );
 }
+
+

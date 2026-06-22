@@ -17,7 +17,7 @@ export default function Admin() {
   const [chartData, setChartData] = useState([]);
   const [activeTab, setActiveTab] = useState("ringkasan");
 
-  const [stats, setStats] = useState({ tps: 0, transporter: 0, warga: 0, laporan: 0, menunggu: 0 });
+  const [stats, setStats] = useState({ tps: 0, Courier: 0, warga: 0, laporan: 0, menunggu: 0 });
   const [liveDrivers, setLiveDrivers] = useState({});
   const [onlineUsers, setOnlineUsers] = useState({});
   const [lastMessages, setLastMessages] = useState({});
@@ -63,11 +63,12 @@ export default function Admin() {
   const [allWarga, setAllWarga] = useState([]);
   const [pembayaran, setPembayaran] = useState([]);
   const [pengangkutan, setPengangkutan] = useState([]);
-  const [transporterList, setTransporterList] = useState([]);
+  const [CourierList, setCourierList] = useState([]);
   const [redeemList, setRedeemList] = useState([]);
   const [katalogRedeem, setKatalogRedeem] = useState([]);
   const [ecopoinData, setEcopoinData] = useState([]); // [{nama, total_berat, poin, warga_id}]
   const [pieData, setPieData] = useState([]);
+  const [transaksiCourier, setTransaksiCourier] = useState([]);
   const [loading, setLoading] = useState(true);
   const [chatTarget, setChatTarget] = useState(null);
 
@@ -75,8 +76,8 @@ export default function Admin() {
   const [editModal, setEditModal] = useState({ open: false, type: "", data: null });
   const [buktiModal, setBuktiModal] = useState({ open: false, url: "" });
 
-  const fetchAll = async () => {
-    setLoading(true);
+  const fetchAll = async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (authUser) {
@@ -84,7 +85,7 @@ export default function Admin() {
         setUser({ id: authUser.id, nama: profile?.name || "Admin", email: authUser.email, avatar_url: profile?.avatar_url });
       }
 
-      const [wRes, tRes, sRes, bayarRes, angkutRes, rRes, katRes, msgRes] = await Promise.all([
+      const [wRes, tRes, sRes, bayarRes, angkutRes, rRes, katRes, msgRes, tcRes] = await Promise.all([
         supabase.from("warga").select("id, nama, alamat, location, pembayaran(status)"),
         supabase.from("profiles").select("id, name").eq("role", "transporter"),
         supabase.from("sampah").select("id, warga_id, jenis, berat, created_at, warga(nama, alamat)"),
@@ -92,16 +93,18 @@ export default function Admin() {
         supabase.from("pengangkutan").select("id, warga_id, transporter_id, status, created_at, bukti_url, warga(nama)"),
         supabase.from("redeem_poin").select("*, warga(nama)").order("created_at", { ascending: false }),
         supabase.from("katalog_redeem").select("*").order("cost", { ascending: true }),
-        supabase.from("chat_messages").select("sender_id, receiver_id, created_at")
+        supabase.from("chat_messages").select("sender_id, receiver_id, created_at"),
+        supabase.from("transaksi_courier").select("*, profiles(name)").order("tanggal", { ascending: false })
       ]);
 
       setAllWarga(wRes.data || []);
       setLaporan(sRes.data || []);
       setPembayaran(bayarRes.data || []);
       setPengangkutan(angkutRes.data || []);
-      setTransporterList(tRes.data || []);
+      setCourierList(tRes.data || []);
       setRedeemList(rRes.data || []);
       setKatalogRedeem(katRes.data || []);
+      setTransaksiCourier(tcRes?.data || []);
 
       // Hitung last message per user
       const lastMsgMap = {};
@@ -156,7 +159,7 @@ export default function Admin() {
 
       setStats({
         tps: wRes.data.length,
-        transporter: tRes.data?.length || 0,
+        Courier: tRes.data?.length || 0,
         warga: wRes.data.length,
         laporan: sampahData.length,
         menunggu: bayarRes.data?.filter(b => b.status === "belum").length || 0,
@@ -164,12 +167,18 @@ export default function Admin() {
     } catch (err) {
       console.error(err);
     } finally {
-      await new Promise(res => setTimeout(res, 1500));
-      setLoading(false);
+      if (!isBackground) {
+        await new Promise(res => setTimeout(res, 1500));
+        setLoading(false);
+      }
     }
   };
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { 
+    fetchAll(); 
+    const interval = setInterval(() => fetchAll(true), 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   const verifikasiPembayaran = async (id) => {
     const { error } = await supabase.from("pembayaran").update({ status: "sudah" }).eq("id", id);
@@ -191,7 +200,7 @@ export default function Admin() {
     if (!result.isConfirmed) return;
     const { error } = await supabase.from("pembayaran").delete().eq("id", id);
     if (error) return alert("Gagal tolak: " + error.message);
-    await fetchTransporters();
+    await fetchCouriers();
   };
 
   // GSAP Animations
@@ -233,7 +242,7 @@ export default function Admin() {
     } else if (type === "pengangkutan") {
       table = "pengangkutan";
       payload = { transporter_id: data.transporter_id || null, status: data.status };
-    } else if (type === "transporter") {
+    } else if (type === "Courier") {
       table = "profiles";
       payload = { name: data.name };
     }
@@ -324,11 +333,15 @@ export default function Admin() {
       icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
     },
     {
+      id: "laporankeuangan", label: "Laporan Keuangan",
+      icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+    },
+    {
       id: "ecopoin", label: "Eco Poin",
       icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>
     },
     {
-      id: "transporter", label: "Transporter",
+      id: "Courier", label: "Courier",
       icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l2.414 2.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h4m-6 0a1 1 0 001-1m-6 0H9" /></svg>
     },
     {
@@ -336,7 +349,7 @@ export default function Admin() {
       icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M16 7a4 4 0 11-8 0 4 4 0 018 0zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
     },
     {
-      id: "datatransporter", label: "Data Transporter",
+      id: "dataCourier", label: "Data Courier",
       icon: <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
     },
     {
@@ -395,10 +408,10 @@ export default function Admin() {
                   </div>
                   <div className="stat-card">
                     <div className="stat-icon-wrapper">
-                      <span className="stat-title">Armada Transporter</span>
+                      <span className="stat-title">Armada Courier</span>
                       <svg className="stat-icon-svg" style={{ color: "#3b82f6" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                     </div>
-                    <div className="stat-value" style={{ color: "#3b82f6" }}>{stats.transporter} Akun</div>
+                    <div className="stat-value" style={{ color: "#3b82f6" }}>{stats.Courier} Akun</div>
                   </div>
                   <div className="stat-card">
                     <div className="stat-icon-wrapper">
@@ -644,6 +657,60 @@ export default function Admin() {
               </>
             )}
 
+            {/* ── TAB: Laporan Keuangan ── */}
+            {activeTab === "laporankeuangan" && (
+              <div id="pdf-content">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text-main)" }}>Laporan Keuangan Global</h3>
+                </div>
+
+                <div className="dashboard-grid" style={{ marginBottom: "20px" }}>
+                  <div className="stat-card">
+                    <div className="stat-icon-wrapper"><span className="stat-title">Total Pemasukan</span><svg className="stat-icon-svg" style={{ color: "#10b981" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>
+                    <div className="stat-value" style={{ color: "#10b981" }}>Rp {pembayaran.filter(p => p.status === "sudah").reduce((acc, p) => acc + (p.jumlah || 0), 0).toLocaleString("id-ID")}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-icon-wrapper"><span className="stat-title">Total Pengeluaran (Courier)</span><svg className="stat-icon-svg" style={{ color: "#ef4444" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" /></svg></div>
+                    <div className="stat-value" style={{ color: "#ef4444" }}>Rp {transaksiCourier.reduce((acc, t) => acc + (t.jumlah || 0), 0).toLocaleString("id-ID")}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-icon-wrapper"><span className="stat-title">Saldo Bersih</span><svg className="stat-icon-svg" style={{ color: "#3b82f6" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>
+                    <div className="stat-value" style={{ color: "#3b82f6" }}>Rp {(pembayaran.filter(p => p.status === "sudah").reduce((acc, p) => acc + (p.jumlah || 0), 0) - transaksiCourier.reduce((acc, t) => acc + (t.jumlah || 0), 0)).toLocaleString("id-ID")}</div>
+                  </div>
+                </div>
+
+                <div className="map-container-wrapper" style={{ marginTop: 0 }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Rincian Transaksi Courier (Pengeluaran)</h3>
+                  <div className="table-container">
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid #e2e8f0", color: "var(--color-text-muted)", textAlign: "left" }}>
+                          <th style={{ padding: "10px 12px" }}>Tanggal</th>
+                          <th style={{ padding: "10px 12px" }}>Courier</th>
+                          <th style={{ padding: "10px 12px" }}>Keterangan</th>
+                          <th style={{ padding: "10px 12px" }}>Jumlah</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {transaksiCourier.length === 0 ? (
+                          <tr><td colSpan="4" style={{ padding: "20px", textAlign: "center", color: "var(--color-text-muted)" }}>Belum ada pengeluaran Courier.</td></tr>
+                        ) : (
+                          transaksiCourier.map(t => (
+                            <tr key={t.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                              <td style={{ padding: "12px", color: "var(--color-text-muted)" }}>{new Date(t.tanggal).toLocaleDateString("id-ID", { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                              <td style={{ padding: "12px", fontWeight: 600 }}>{t.profiles?.name || "Anonim"}</td>
+                              <td style={{ padding: "12px" }}>{t.keterangan || "-"}</td>
+                              <td style={{ padding: "12px", color: "#ef4444", fontWeight: 700 }}>- Rp {(t.jumlah || 0).toLocaleString("id-ID")}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ── TAB: Eco Poin (BARU) ── */}
             {activeTab === "ecopoin" && (
               <div id="pdf-content">
@@ -708,8 +775,8 @@ export default function Admin() {
               </div>
             )}
 
-            {/* ── TAB: Transporter ── */}
-            {activeTab === "transporter" && (
+            {/* ── TAB: Courier ── */}
+            {activeTab === "Courier" && (
               <div className="map-container-wrapper" style={{ marginTop: 0 }}>
                 <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Manajemen Pengangkutan Sampah</h3>
                 <div className="table-container">
@@ -725,7 +792,7 @@ export default function Admin() {
                         : pengangkutan.map(a => (
                           <tr key={a.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                             <td style={{ padding: "12px", fontWeight: 600 }}>{a.warga?.nama || "-"}</td>
-                            <td style={{ padding: "12px" }}>{transporterList.find(t => t.id === a.transporter_id)?.name || "Belum Ditugaskan"}</td>
+                            <td style={{ padding: "12px" }}>{CourierList.find(t => t.id === a.transporter_id)?.name || "Belum Ditugaskan"}</td>
                             <td style={{ padding: "12px" }}>
                               <span style={{ padding: "3px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", backgroundColor: a.status === "selesai" ? "#dcfce7" : a.status === "proses" ? "#dbeafe" : "#fef3c7", color: a.status === "selesai" ? "#16a34a" : a.status === "proses" ? "#2563eb" : "#d97706" }}>{a.status}</span>
                             </td>
@@ -754,7 +821,7 @@ export default function Admin() {
                     <p style={{ fontSize: "12px", color: "var(--color-text-muted)", margin: "4px 0 0 0" }}>Pilih pengguna untuk membalas chat</p>
                   </div>
                   <div style={{ flex: 1, overflowY: "auto", padding: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {[...allWarga.map(w => ({...w, _role: 'Warga'})), ...transporterList.map(t => ({...t, _role: 'Transporter', nama: t.name}))]
+                    {[...allWarga.map(w => ({...w, _role: 'Warga'})), ...CourierList.map(t => ({...t, _role: 'Courier', nama: t.name}))]
                       .sort((a, b) => {
                         const timeA = lastMessages[a.id] || 0;
                         const timeB = lastMessages[b.id] || 0;
@@ -843,29 +910,29 @@ export default function Admin() {
               </div>
             )}
 
-            {/* ── TAB: Data Transporter ── */}
-            {activeTab === "datatransporter" && (
+            {/* ── TAB: Data Courier ── */}
+            {activeTab === "dataCourier" && (
               <div className="map-container-wrapper" style={{ marginTop: 0 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                  <h3 style={{ fontSize: "16px", fontWeight: 700 }}>Daftar Akun Transporter</h3>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700 }}>Daftar Akun Courier</h3>
                   <p style={{ fontSize: "12px", color: "var(--color-text-muted)" }}>*Penambahan akun baru dilakukan via halaman Register</p>
                 </div>
                 <div className="table-container">
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
                     <thead>
                       <tr style={{ borderBottom: "1px solid #e2e8f0", color: "var(--color-text-muted)", textAlign: "left" }}>
-                        <th style={{ padding: "10px 12px" }}>Nama Transporter</th><th style={{ padding: "10px 12px" }}>ID Akun (UUID)</th><th style={{ padding: "10px 12px" }}>Aksi</th>
+                        <th style={{ padding: "10px 12px" }}>Nama Courier</th><th style={{ padding: "10px 12px" }}>ID Akun (UUID)</th><th style={{ padding: "10px 12px" }}>Aksi</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {transporterList.length === 0
-                        ? <tr><td colSpan="3" style={{ padding: "20px", textAlign: "center", color: "var(--color-text-muted)" }}>Belum ada akun transporter terdaftar.</td></tr>
-                        : transporterList.map(t => (
+                      {CourierList.length === 0
+                        ? <tr><td colSpan="3" style={{ padding: "20px", textAlign: "center", color: "var(--color-text-muted)" }}>Belum ada akun Courier terdaftar.</td></tr>
+                        : CourierList.map(t => (
                           <tr key={t.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                             <td style={{ padding: "12px", fontWeight: 600 }}>{t.name}</td>
                             <td style={{ padding: "12px", color: "var(--color-text-muted)", fontSize: "11px", fontFamily: "monospace" }}>{t.id}</td>
                             <td style={{ padding: "12px", display: "flex", gap: "6px" }}>
-                              <button onClick={() => setEditModal({ open: true, type: "transporter", data: t })} className="btn-primary" style={{ padding: "4px 10px", fontSize: "11px", width: "auto", background: "#3b82f6", borderColor: "#2563eb" }}>Edit</button>
+                              <button onClick={() => setEditModal({ open: true, type: "Courier", data: t })} className="btn-primary" style={{ padding: "4px 10px", fontSize: "11px", width: "auto", background: "#3b82f6", borderColor: "#2563eb" }}>Edit</button>
                               <button onClick={() => hapusData("profiles", t.id)} className="btn-logout" style={{ padding: "4px 10px", fontSize: "11px" }}>Hapus</button>
                             </td>
                           </tr>
@@ -988,8 +1055,8 @@ export default function Admin() {
                       <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>Pilih menu Verifikasi Bayar, cek bukti transfer yang dilampirkan warga, lalu klik Setujui jika valid.</p>
                     </div>
                     <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                      <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Manajemen Transporter</h4>
-                      <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>Gunakan menu Transporter untuk meng-assign laporan penjemputan dari warga ke *driver* truk yang sesuai.</p>
+                      <h4 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-primary)", marginBottom: "8px" }}>Manajemen Courier</h4>
+                      <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.6 }}>Gunakan menu Courier untuk meng-assign laporan penjemputan dari warga ke *driver* truk yang sesuai.</p>
                     </div>
                   </div>
                 </div>
@@ -1036,10 +1103,10 @@ export default function Admin() {
                 {editModal.type === "pengangkutan" && (
                   <>
                     <div className="form-group">
-                      <label className="form-label">Pilih Transporter (Driver)</label>
+                      <label className="form-label">Pilih Courier (Driver)</label>
                       <select className="form-select" value={editModal.data.transporter_id || ""} onChange={e => setEditModal(prev => ({ ...prev, data: { ...prev.data, transporter_id: e.target.value || null } }))}>
                         <option value="">-- Belum Ditugaskan --</option>
-                        {transporterList.map(t => (
+                        {CourierList.map(t => (
                           <option key={t.id} value={t.id}>{t.name}</option>
                         ))}
                       </select>
@@ -1054,10 +1121,10 @@ export default function Admin() {
                     </div>
                   </>
                 )}
-                {editModal.type === "transporter" && (
+                {editModal.type === "Courier" && (
                   <>
                     <div className="form-group">
-                      <label className="form-label">Nama Transporter</label>
+                      <label className="form-label">Nama Courier</label>
                       <input className="form-input" required value={editModal.data.name || ""} onChange={e => setEditModal(prev => ({ ...prev, data: { ...prev.data, name: e.target.value } }))} />
                     </div>
                   </>
@@ -1090,3 +1157,5 @@ export default function Admin() {
     </div>
   );
 }
+
+

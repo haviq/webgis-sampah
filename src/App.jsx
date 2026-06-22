@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabase";
 import Admin from "./pages/Admin";
-import Transporter from "./pages/Transporter";
+import Courier from "./pages/Courier";
 import Warga from "./pages/Warga";
 import Login from "./pages/Login";
 
@@ -56,7 +56,7 @@ function App() {
 
   if (role === "guest") return <Login />;
   if (role === "admin") return <Admin />;
-  if (role === "transporter") return <Transporter />;
+  if (role === "transporter") return <Courier />;
   return <Warga />;
 }
 

@@ -132,7 +132,7 @@ export default function Register() {
               disabled={loading}
             >
               <option value="warga">Warga (Masyarakat)</option>
-              <option value="transporter">Transporter (Pengangkut Sampah)</option>
+              <option value="transporter">Courier (Pengangkut Sampah)</option>
               <option value="admin">Admin Dinas Kebersihan</option>
             </select>
           </div>
@@ -152,3 +152,4 @@ export default function Register() {
     </div>
   );
 }
+

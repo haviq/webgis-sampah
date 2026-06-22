@@ -36,13 +36,13 @@ export default function Sidebar({ user, role, activeTab, setActiveTab, isCollaps
 
   const getBrandTitle = () => {
     if (role === "admin") return "WEBGIS ADMIN";
-    if (role === "transporter") return "TRANSPORTER";
+    if (role === "Courier") return "Courier";
     return "ECO WARGA";
   };
 
   const getAvatarColor = () => {
     if (role === "admin") return "#1e293b";
-    if (role === "transporter") return "#d97706";
+    if (role === "Courier") return "#d97706";
     return "#059669";
   };
 
@@ -299,3 +299,4 @@ export default function Sidebar({ user, role, activeTab, setActiveTab, isCollaps
     </aside>
   );
 }
+

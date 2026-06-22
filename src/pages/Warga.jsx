@@ -83,6 +83,7 @@ export default function Warga() {
   const [loading, setLoading] = useState(true);
   const [payLoading, setPayLoading] = useState(false);
   const [buktiFile, setBuktiFile] = useState(null);
+  const [nominalTransfer, setNominalTransfer] = useState("");
 
   const refreshHistory = async (id) => {
     const [s, b, a, r, kat] = await Promise.all([
@@ -167,6 +168,14 @@ export default function Warga() {
     init();
   }, []);
 
+  useEffect(() => {
+    if (!wargaData?.id) return;
+    const interval = setInterval(() => {
+      refreshHistory(wargaData.id);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [wargaData?.id]);
+
   // GSAP Animations
   useEffect(() => {
     if (!loading) {
@@ -203,7 +212,7 @@ export default function Warga() {
 
     if (trackingChannel) {
       trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'admin', msg: `Laporan/Request baru dari warga!` } });
-      trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'transporter', msg: `Laporan/Request baru dari warga!` } });
+      trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'Courier', msg: `Laporan/Request baru dari warga!` } });
     }
 
     setForm({ ...form, jenis: "Plastik & Kertas", berat: "" });
@@ -242,7 +251,7 @@ export default function Warga() {
 
     if (trackingChannel) {
       trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'admin', msg: `Request penjemputan sampah baru dari warga!` } });
-      trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'transporter', msg: `Tugas jemput baru dari warga tersedia!` } });
+      trackingChannel.send({ type: 'broadcast', event: 'notif', payload: { role: 'Courier', msg: `Tugas jemput baru dari warga tersedia!` } });
     }
 
     setForm({ ...form, jenis: "Plastik & Kertas", berat: "" });
@@ -277,27 +286,62 @@ export default function Warga() {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) throw new Error("Silakan login ulang.");
 
-      let bukti_url = null;
-      if (buktiFile) {
-        const fileExt = buktiFile.name.split('.').pop();
-        const fileName = `bayar-${authUser.id}-${Date.now()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage.from('uploads').upload(fileName, buktiFile);
-        if (uploadError) throw new Error("Gagal upload foto bukti: " + uploadError.message);
-        bukti_url = supabase.storage.from('uploads').getPublicUrl(fileName).data.publicUrl;
-      }
+      const finalNominal = nominalTransfer ? parseInt(nominalTransfer) : totalBiaya;
 
-      const { error } = await supabase.from("pembayaran").insert({
+      // Catat di database sebagai 'belum'
+      const { data: newBayar, error: insertError } = await supabase.from("pembayaran").insert({
         warga_id: wargaData.id,
         status: "belum",
         tanggal: new Date().toISOString().split("T")[0],
-        bukti_url: bukti_url
-      });
-      if (error) throw error;
+        bukti_url: null,
+        jumlah: finalNominal,
+        keterangan: "Pembayaran Retribusi Bulan " + new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" })
+      }).select().single();
+      
+      if (insertError) throw insertError;
 
-      alert("✅ Bukti pembayaran berhasil dikirim! Menunggu verifikasi Admin.");
-      await refreshHistory(wargaData.id);
+      // Panggil API Vercel Backend kita
+      const response = await fetch('/api/charge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: newBayar.id,
+          grossAmount: finalNominal,
+          customerName: user.nama,
+          customerEmail: user.email
+        })
+      });
+
+      const resData = await response.json();
+      if (!response.ok) {
+        await supabase.from("pembayaran").delete().eq("id", newBayar.id);
+        throw new Error(resData.error || "Gagal memanggil Midtrans Gateway");
+      }
+
+      // Buka popup Midtrans Snap
+      window.snap.pay(resData.token, {
+        onSuccess: function(result){
+          alert("Pembayaran berhasil!");
+          setTimeout(() => refreshHistory(wargaData.id), 2000);
+        },
+        onPending: function(result){
+          alert("Menunggu penyelesaian pembayaran Anda!");
+          refreshHistory(wargaData.id);
+        },
+        onError: async function(result){
+          await supabase.from("pembayaran").delete().eq("id", newBayar.id);
+          alert("Pembayaran gagal!");
+          refreshHistory(wargaData.id);
+        },
+        onClose: async function(){
+          // Jika popup ditutup sebelum bayar, hapus dari database agar warga bisa klik bayar lagi
+          await supabase.from("pembayaran").delete().eq("id", newBayar.id);
+          refreshHistory(wargaData.id);
+        }
+      });
+
     } catch (err) {
-      alert("Gagal kirim pembayaran: " + err.message);
+      alert("Gagal proses pembayaran: " + err.message);
     } finally {
       setPayLoading(false);
     }
@@ -692,7 +736,7 @@ export default function Warga() {
                           {history.angkut.slice(0).reverse().map(a => (
                             <tr key={a.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                               <td style={{ padding: "8px" }}>{new Date(a.created_at).toLocaleDateString("id-ID", { day: 'numeric', month: 'short' })}</td>
-                              <td style={{ padding: "8px" }}>{a.transporter?.profiles?.name || "-"}</td>
+                              <td style={{ padding: "8px" }}>{a.Courier?.profiles?.name || "-"}</td>
                               <td style={{ padding: "8px" }}>
                                 <span style={{
                                   padding: "2px 6px", borderRadius: "4px", fontSize: "11px", fontWeight: "bold",
@@ -771,13 +815,13 @@ export default function Warga() {
                     </div>
 
                     <div style={{ display: "flex", flexDirection: "column", gap: "12px", alignItems: "center", backgroundColor: "#f8fafc", padding: "20px", borderRadius: "12px", border: "1px dashed #cbd5e1" }}>
-                      <p style={{ margin: 0, color: "var(--color-text-main)", textAlign: "center", fontSize: "14px" }}>Silakan transfer sebesar <strong style={{ fontSize: "16px", color: "var(--color-primary)" }}>Rp {totalBiaya.toLocaleString("id-ID")}</strong> ke Rekening BCA <strong>1234567890</strong> a/n Pengelola Sampah.</p>
+                      <p style={{ margin: 0, color: "var(--color-text-main)", textAlign: "center", fontSize: "14px" }}>Pembayaran akan diproses secara aman menggunakan <strong>Midtrans</strong>.</p>
                       <div className="form-group" style={{ width: "100%", maxWidth: "300px" }}>
-                        <label className="form-label" style={{ textAlign: "center" }}>Upload Bukti Transfer (Opsional)</label>
-                        <input type="file" accept="image/*" onChange={(e) => setBuktiFile(e.target.files[0])} className="form-input" style={{ padding: "8px" }} />
+                        <label className="form-label" style={{ textAlign: "center" }}>Ubah Nominal Pembayaran (Bila perlu)</label>
+                        <input type="number" placeholder={`Contoh: ${totalBiaya}`} value={nominalTransfer} onChange={(e) => setNominalTransfer(e.target.value)} className="form-input" style={{ padding: "8px" }} />
                       </div>
                       <button onClick={bayarRetribusi} disabled={payLoading} className="btn-primary" style={{ maxWidth: "300px" }}>
-                        {payLoading ? "Memproses..." : "Saya Sudah Transfer"}
+                        {payLoading ? "Memproses..." : "Bayar dengan Midtrans"}
                       </button>
                     </div>
                   </div>
@@ -801,6 +845,7 @@ export default function Warga() {
                               <div style={{ fontSize: "12px", color: "var(--color-text-muted)", marginTop: "2px" }}>
                                 {b.tanggal ? new Date(b.tanggal).toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : "-"}
                               </div>
+                              {b.jumlah && <div style={{ fontSize: "13px", fontWeight: "bold", color: "var(--color-primary)", marginTop: "4px" }}>Rp {b.jumlah.toLocaleString("id-ID")}</div>}
                             </div>
                             <span style={{ padding: "5px 12px", borderRadius: "20px", fontSize: "12px", fontWeight: 700, backgroundColor: sc.bg, color: sc.color }}>
                               {sc.label}
@@ -1008,3 +1053,4 @@ export default function Warga() {
     </div>
   );
 }
+

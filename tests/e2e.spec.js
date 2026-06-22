@@ -2,13 +2,13 @@ import { test, expect } from '@playwright/test';
 
 // GANTI DENGAN KREDENSIAL AKUN TES ANDA!
 const AKUN_WARGA = { email: 'tes@gmail.com', password: 'tes123' };
-const AKUN_TRANSPORTER = { email: 'trans@gmail.com', password: 'trans123' };
+const AKUN_COURIER = { email: 'trans@gmail.com', password: 'trans123' };
 const AKUN_ADMIN = { email: 'adminn@gmail.com', password: 'admin123' };
 
 test.describe('E2E Alur Penjemputan Sampah', () => {
 
-  test('Skenario: Warga Panggil Truk, Transporter Ambil, Transporter Selesaikan', async ({ browser }) => {
-    // 1. Siapkan 2 jendela terpisah (Satu untuk Warga, Satu untuk Transporter)
+  test('Skenario: Warga Panggil Truk, Courier Ambil, Courier Selesaikan', async ({ browser }) => {
+    // 1. Siapkan 2 jendela terpisah (Satu untuk Warga, Satu untuk Courier)
     const wargaContext = await browser.newContext();
     const transContext = await browser.newContext();
 
@@ -34,12 +34,12 @@ test.describe('E2E Alur Penjemputan Sampah', () => {
     // Beri waktu sistem memproses database
     await wargaPage.waitForTimeout(2000);
 
-    // =============== PROSES TRANSPORTER ===============
+    // =============== PROSES Courier ===============
     await transPage.goto('http://localhost:5173/');
 
-    // Transporter Login
-    await transPage.fill('input[type="email"]', AKUN_TRANSPORTER.email);
-    await transPage.fill('input[type="password"]', AKUN_TRANSPORTER.password);
+    // Courier Login
+    await transPage.fill('input[type="email"]', AKUN_COURIER.email);
+    await transPage.fill('input[type="password"]', AKUN_COURIER.password);
     await transPage.click('button:has-text("Masuk")');
     await transPage.waitForURL('**/dashboard');
 
@@ -62,7 +62,8 @@ test.describe('E2E Alur Penjemputan Sampah', () => {
     const tombolWarga = wargaPage.locator('button:has-text("Sedang Dijadwalkan")');
     await expect(tombolWarga).toBeVisible();
 
-    console.log("✅ TES SUKSES: Warga memanggil truk, Transporter mengambil tugas. Data aman tanpa ganda!");
+    console.log("✅ TES SUKSES: Warga memanggil truk, Courier mengambil tugas. Data aman tanpa ganda!");
   });
 
 });
+

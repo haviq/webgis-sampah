@@ -194,7 +194,7 @@ export default function Map({ setLatLng, selectedMarker, data = [], liveDrivers 
                 <Marker key={d.id} position={{ lat: d.lat, lng: d.lng }} icon={truckIcon}>
                   <Popup>
                     <div style={{ padding: "4px", textAlign: "center" }}>
-                      <strong style={{ fontSize: "14px", color: "#d97706" }}>Truk Transporter</strong><br />
+                      <strong style={{ fontSize: "14px", color: "#d97706" }}>Truk Courier</strong><br />
                       <span style={{ fontSize: "12px", color: "var(--color-text-muted)" }}>{d.nama || 'Armada Aktif'}</span>
                     </div>
                   </Popup>
@@ -217,3 +217,4 @@ export default function Map({ setLatLng, selectedMarker, data = [], liveDrivers 
     </div>
   );
 }
+
