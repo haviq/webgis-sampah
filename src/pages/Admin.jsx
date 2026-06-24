@@ -15,6 +15,7 @@ export default function Admin() {
   const [user, setUser] = useState({ nama: "Admin", email: "" });
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [chartData, setChartData] = useState([]);
+  const [financeChartData, setFinanceChartData] = useState([]);
   const [activeTab, setActiveTab] = useState("ringkasan");
 
   const [stats, setStats] = useState({ tps: 0, Courier: 0, warga: 0, laporan: 0, menunggu: 0 });
@@ -54,8 +55,8 @@ export default function Admin() {
       }
     });
 
-    return () => { 
-      supabase.removeChannel(channel); 
+    return () => {
+      supabase.removeChannel(channel);
       supabase.removeChannel(presenceChannel);
     }
   }, []);
@@ -76,9 +77,35 @@ export default function Admin() {
   const [editModal, setEditModal] = useState({ open: false, type: "", data: null });
   const [buktiModal, setBuktiModal] = useState({ open: false, url: "" });
 
+  const [appSettings, setAppSettings] = useState({
+    baseFee: 30000,
+    feePerKm: 2200,
+    tpaLat: -7.8286,
+    tpaLng: 110.3789
+  });
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
   const fetchAll = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
+      if (!isBackground) {
+        try {
+          const { data: sData, error: sErr } = await supabase.storage.from("uploads").download("settings.json");
+          if (!sErr && sData) {
+            const text = await sData.text();
+            const parsed = JSON.parse(text);
+            setAppSettings({
+              baseFee: parsed.baseFee !== undefined ? Number(parsed.baseFee) : 30000,
+              feePerKm: parsed.feePerKm !== undefined ? Number(parsed.feePerKm) : 2200,
+              tpaLat: parsed.tpaLat !== undefined ? Number(parsed.tpaLat) : -7.8286,
+              tpaLng: parsed.tpaLng !== undefined ? Number(parsed.tpaLng) : 110.3789
+            });
+          }
+        } catch (err) {
+          console.warn("Failed to load settings:", err);
+        }
+      }
+
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (authUser) {
         const { data: profile } = await supabase.from("profiles").select("*").eq("id", authUser.id).maybeSingle();
@@ -157,6 +184,25 @@ export default function Admin() {
         }));
       setChartData(cData);
 
+      // Build finance chart data (Pemasukan dari pembayaran retribusi yang 'sudah' lunas)
+      const groupedFinanceByDate = {};
+      const pembayaranList = bayarRes.data || [];
+      pembayaranList.forEach(p => {
+        if (!p.tanggal || p.status !== "sudah") return;
+        const rawDate = p.tanggal; // format: YYYY-MM-DD
+        if (!groupedFinanceByDate[rawDate]) {
+          groupedFinanceByDate[rawDate] = { rawDate, nominal: 0 };
+        }
+        groupedFinanceByDate[rawDate].nominal += (p.jumlah || 0);
+      });
+      const fData = Object.values(groupedFinanceByDate)
+        .sort((a, b) => a.rawDate.localeCompare(b.rawDate))
+        .map(d => ({
+          date: new Date(d.rawDate).toLocaleDateString("id-ID", { day: 'numeric', month: 'short' }),
+          "Pemasukan (Rp)": d.nominal
+        }));
+      setFinanceChartData(fData);
+
       setStats({
         tps: wRes.data.length,
         Courier: tRes.data?.length || 0,
@@ -174,8 +220,8 @@ export default function Admin() {
     }
   };
 
-  useEffect(() => { 
-    fetchAll(); 
+  useEffect(() => {
+    fetchAll();
     const interval = setInterval(() => fetchAll(true), 3000);
     return () => clearInterval(interval);
   }, []);
@@ -266,43 +312,339 @@ export default function Admin() {
     await fetchAll();
   };
 
-  const exportCSV = () => {
-    if (laporan.length === 0) return alert("Tidak ada data laporan sampah untuk diexport.");
-    let csvContent = "data:text/csv;charset=utf-8,ID,Warga,Jenis Sampah,Berat (Kg),Tanggal\n";
-    laporan.forEach(r => {
-      const row = `${r.id},"${r.warga?.nama || ''}","${r.jenis}",${r.berat},"${new Date(r.created_at).toLocaleDateString('id-ID')}"`;
-      csvContent += row + "\n";
-    });
-    const encodedUri = encodeURI(csvContent);
+  const downloadCSV = (content, filename) => {
+    const blob = new Blob(["\uFEFF" + content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Laporan_Sampah_${new Date().toISOString().split("T")[0]}.csv`);
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
-  const exportPDF = () => {
-    const input = document.getElementById("pdf-content");
-    if (!input) return;
-    const btn = document.getElementById("btn-pdf");
-    if(btn) btn.innerHTML = "Memproses...";
-    html2canvas(input, { scale: 2, backgroundColor: "#f8fafc" }).then((canvas) => {
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      
-      pdf.setFontSize(18);
-      pdf.setTextColor(15, 23, 42);
-      pdf.text("Laporan Eksekutif Pengelolaan Sampah", 14, 22);
-      pdf.setFontSize(11);
-      pdf.setTextColor(100, 116, 139);
-      pdf.text("Tanggal Unduh: " + new Date().toLocaleDateString("id-ID"), 14, 30);
-      
-      pdf.addImage(imgData, "PNG", 0, 40, pdfWidth, pdfHeight);
-      pdf.save("Laporan_Eksekutif_WebGIS.pdf");
-      if(btn) btn.innerHTML = "Export Laporan PDF";
+  const triggerExport = async ({ selectedReports, format }) => {
+    Swal.fire({
+      title: 'Mempersiapkan data...',
+      text: 'Mohon tunggu sebentar.',
+      allowOutsideClick: false,
+      didOpen: () => {
+        Swal.showLoading();
+      }
+    });
+
+    try {
+      if (format === 'csv') {
+        if (selectedReports.sampah) {
+          let csv = "ID,Warga,Alamat,Jenis Sampah,Berat (Kg),Tanggal\n";
+          laporan.forEach(r => {
+            csv += `${r.id},"${r.warga?.nama || ''}","${r.warga?.alamat || ''}","${r.jenis}",${r.berat},"${new Date(r.created_at).toLocaleDateString('id-ID')}"\n`;
+          });
+          downloadCSV(csv, `Laporan_Sampah_${new Date().toISOString().split("T")[0]}.csv`);
+        }
+        if (selectedReports.retribusi) {
+          let csv = "ID,Tanggal,Warga,Status,Jumlah (Rp)\n";
+          pembayaran.forEach(r => {
+            csv += `${r.id},"${new Date(r.tanggal).toLocaleDateString('id-ID')}","${r.warga?.nama || ''}","${r.status === 'sudah' ? 'Lunas' : 'Belum/Menunggu'}",${r.jumlah || 0}\n`;
+          });
+          downloadCSV(csv, `Laporan_Retribusi_${new Date().toISOString().split("T")[0]}.csv`);
+        }
+        if (selectedReports.pengangkutan) {
+          let csv = "ID,Tanggal,Warga,Driver/Courier,Status\n";
+          pengangkutan.forEach(r => {
+            const driverName = CourierList.find(t => t.id === r.transporter_id)?.name || "Belum Ditugaskan";
+            csv += `${r.id},"${new Date(r.created_at).toLocaleDateString('id-ID')}","${r.warga?.nama || ''}","${driverName}","${r.status}"\n`;
+          });
+          downloadCSV(csv, `Laporan_Pengangkutan_${new Date().toISOString().split("T")[0]}.csv`);
+        }
+        if (selectedReports.courier) {
+          let csv = "ID,Tanggal,Courier,Keterangan,Jumlah (Rp)\n";
+          transaksiCourier.forEach(r => {
+            csv += `${r.id},"${new Date(r.tanggal).toLocaleDateString('id-ID')}","${r.profiles?.name || ''}","${r.keterangan || ''}",${r.jumlah || 0}\n`;
+          });
+          downloadCSV(csv, `Laporan_Pendapatan_Courier_${new Date().toISOString().split("T")[0]}.csv`);
+        }
+        Swal.fire({ icon: 'success', title: 'Export Berhasil', text: 'Semua file Excel/CSV telah terunduh.' });
+      } else {
+        const printDiv = document.createElement("div");
+        printDiv.style.padding = "40px 30px";
+        printDiv.style.fontFamily = "'Helvetica Neue', Helvetica, Arial, sans-serif";
+        printDiv.style.color = "#333";
+        printDiv.style.background = "#fff";
+        printDiv.style.width = "800px";
+        printDiv.style.position = "absolute";
+        printDiv.style.left = "-9999px";
+        printDiv.style.top = "-9999px";
+
+        let html = `
+          <div style="border-bottom: 3px double #10b981; padding-bottom: 15px; margin-bottom: 25px; text-align: center;">
+            <h1 style="font-size: 24px; color: #047857; margin: 0; font-weight: 800;">LAPORAN EKSEKUTIF KELOLA SAMPAH & RETRIBUSI</h1>
+            <p style="font-size: 13px; color: #666; margin: 5px 0 0 0; font-style: italic;">Sistem WebGIS Sirkular Ekonomi - KelolaSampah.id</p>
+            <p style="font-size: 11px; color: #999; margin: 3px 0 0 0;">Tanggal Cetak: ${new Date().toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+          </div>
+          
+          <div style="display: flex; gap: 15px; margin-bottom: 25px;">
+            <div style="flex: 1; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; background: #f8fafc; text-align: center;">
+              <div style="font-size: 11px; color: #64748b; font-weight: 600;">TOTAL PEMASUKAN</div>
+              <div style="font-size: 18px; color: #10b981; font-weight: bold; margin-top: 4px;">Rp ${pembayaran.filter(p => p.status === "sudah").reduce((acc, p) => acc + (p.jumlah || 0), 0).toLocaleString("id-ID")}</div>
+            </div>
+            <div style="flex: 1; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; background: #f8fafc; text-align: center;">
+              <div style="font-size: 11px; color: #64748b; font-weight: 600;">TOTAL PENGELUARAN COURIER</div>
+              <div style="font-size: 18px; color: #ef4444; font-weight: bold; margin-top: 4px;">Rp ${transaksiCourier.reduce((acc, t) => acc + (t.jumlah || 0), 0).toLocaleString("id-ID")}</div>
+            </div>
+            <div style="flex: 1; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; background: #f8fafc; text-align: center;">
+              <div style="font-size: 11px; color: #64748b; font-weight: 600;">SALDO BERSIH</div>
+              <div style="font-size: 18px; color: #3b82f6; font-weight: bold; margin-top: 4px;">Rp ${(pembayaran.filter(p => p.status === "sudah").reduce((acc, p) => acc + (p.jumlah || 0), 0) - transaksiCourier.reduce((acc, t) => acc + (t.jumlah || 0), 0)).toLocaleString("id-ID")}</div>
+            </div>
+          </div>
+        `;
+
+        if (selectedReports.sampah) {
+          html += `
+            <div style="margin-bottom: 30px;">
+              <h2 style="font-size: 15px; color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; margin-bottom: 12px; font-weight: 700; display: flex; justify-content: space-between;">
+                <span>1. Laporan Penumpukan Sampah</span>
+                <span style="font-size: 12px; color: #6b7280; font-weight: normal;">Total: ${laporan.length} Laporan</span>
+              </h2>
+              <table style="width: 100%; border-collapse: collapse; font-size: 11px; text-align: left;">
+                <thead>
+                  <tr style="background: #f1f5f9; border-bottom: 1px solid #cbd5e1;">
+                    <th style="padding: 8px; font-weight: 600;">Warga</th>
+                    <th style="padding: 8px; font-weight: 600;">Tanggal</th>
+                    <th style="padding: 8px; font-weight: 600;">Lokasi</th>
+                    <th style="padding: 8px; font-weight: 600;">Jenis Sampah</th>
+                    <th style="padding: 8px; font-weight: 600; text-align: right;">Berat</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${laporan.length === 0 ? `<tr><td colspan="5" style="padding: 10px; text-align: center; color: #999;">Belum ada data</td></tr>` :
+              laporan.map(l => `
+                      <tr style="border-bottom: 1px solid #f1f5f9;">
+                        <td style="padding: 8px; font-weight: 600;">${l.warga?.nama || "Anonim"}</td>
+                        <td style="padding: 8px;">${new Date(l.created_at).toLocaleDateString('id-ID')}</td>
+                        <td style="padding: 8px; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${l.warga?.alamat || '-'}</td>
+                        <td style="padding: 8px;"><span style="background: #ecfdf5; color: #059669; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 10px;">${l.jenis}</span></td>
+                        <td style="padding: 8px; text-align: right; font-weight: bold;">${l.berat} Kg</td>
+                      </tr>
+                    `).join('')
+            }
+                </tbody>
+              </table>
+            </div>
+          `;
+        }
+
+        if (selectedReports.retribusi) {
+          html += `
+            <div style="margin-bottom: 30px;">
+              <h2 style="font-size: 15px; color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; margin-bottom: 12px; font-weight: 700; display: flex; justify-content: space-between;">
+                <span>2. Laporan Pembayaran Retribusi</span>
+                <span style="font-size: 12px; color: #6b7280; font-weight: normal;">Total Transaksi: ${pembayaran.length}</span>
+              </h2>
+              <table style="width: 100%; border-collapse: collapse; font-size: 11px; text-align: left;">
+                <thead>
+                  <tr style="background: #f1f5f9; border-bottom: 1px solid #cbd5e1;">
+                    <th style="padding: 8px; font-weight: 600;">Tanggal</th>
+                    <th style="padding: 8px; font-weight: 600;">Warga</th>
+                    <th style="padding: 8px; font-weight: 600;">Status</th>
+                    <th style="padding: 8px; font-weight: 600; text-align: right;">Jumlah (Rp)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${pembayaran.length === 0 ? `<tr><td colspan="4" style="padding: 10px; text-align: center; color: #999;">Belum ada data</td></tr>` :
+              pembayaran.map(p => `
+                      <tr style="border-bottom: 1px solid #f1f5f9;">
+                        <td style="padding: 8px;">${new Date(p.tanggal).toLocaleDateString('id-ID')}</td>
+                        <td style="padding: 8px; font-weight: 600;">${p.warga?.nama || "Anonim"}</td>
+                        <td style="padding: 8px;">
+                          <span style="background: ${p.status === 'sudah' ? '#dcfce7' : '#fef3c7'}; color: ${p.status === 'sudah' ? '#16a34a' : '#d97706'}; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 10px;">
+                            ${p.status === 'sudah' ? 'LUNAS' : 'PENDING'}
+                          </span>
+                        </td>
+                        <td style="padding: 8px; text-align: right; font-weight: bold; color: #10b981;">+ Rp ${(p.jumlah || 0).toLocaleString("id-ID")}</td>
+                      </tr>
+                    `).join('')
+            }
+                </tbody>
+              </table>
+            </div>
+          `;
+        }
+
+        if (selectedReports.pengangkutan) {
+          html += `
+            <div style="margin-bottom: 30px;">
+              <h2 style="font-size: 15px; color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; margin-bottom: 12px; font-weight: 700; display: flex; justify-content: space-between;">
+                <span>3. Laporan Pengangkutan Sampah</span>
+                <span style="font-size: 12px; color: #6b7280; font-weight: normal;">Total Pengangkutan: ${pengangkutan.length}</span>
+              </h2>
+              <table style="width: 100%; border-collapse: collapse; font-size: 11px; text-align: left;">
+                <thead>
+                  <tr style="background: #f1f5f9; border-bottom: 1px solid #cbd5e1;">
+                    <th style="padding: 8px; font-weight: 600;">Tanggal</th>
+                    <th style="padding: 8px; font-weight: 600;">Warga</th>
+                    <th style="padding: 8px; font-weight: 600;">Driver/Courier</th>
+                    <th style="padding: 8px; font-weight: 600;">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${pengangkutan.length === 0 ? `<tr><td colspan="4" style="padding: 10px; text-align: center; color: #999;">Belum ada data</td></tr>` :
+              pengangkutan.map(p => {
+                const driverName = CourierList.find(t => t.id === p.transporter_id)?.name || "Belum Ditugaskan";
+                return `
+                        <tr style="border-bottom: 1px solid #f1f5f9;">
+                          <td style="padding: 8px;">${new Date(p.created_at).toLocaleDateString('id-ID')}</td>
+                          <td style="padding: 8px; font-weight: 600;">${p.warga?.nama || "Anonim"}</td>
+                          <td style="padding: 8px;">${driverName}</td>
+                          <td style="padding: 8px;">
+                            <span style="background: ${p.status === 'selesai' ? '#dcfce7' : p.status === 'proses' ? '#dbeafe' : '#fef3c7'}; color: ${p.status === 'selesai' ? '#16a34a' : p.status === 'proses' ? '#2563eb' : '#d97706'}; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 10px; text-transform: uppercase;">
+                              ${p.status}
+                            </span>
+                          </td>
+                        </tr>
+                      `;
+              }).join('')
+            }
+                </tbody>
+              </table>
+            </div>
+          `;
+        }
+
+        if (selectedReports.courier) {
+          html += `
+            <div style="margin-bottom: 30px;">
+              <h2 style="font-size: 15px; color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; margin-bottom: 12px; font-weight: 700; display: flex; justify-content: space-between;">
+                <span>4. Laporan Pendapatan / Transaksi Courier</span>
+                <span style="font-size: 12px; color: #6b7280; font-weight: normal;">Total Transaksi: ${transaksiCourier.length}</span>
+              </h2>
+              <table style="width: 100%; border-collapse: collapse; font-size: 11px; text-align: left;">
+                <thead>
+                  <tr style="background: #f1f5f9; border-bottom: 1px solid #cbd5e1;">
+                    <th style="padding: 8px; font-weight: 600;">Tanggal</th>
+                    <th style="padding: 8px; font-weight: 600;">Nama Courier</th>
+                    <th style="padding: 8px; font-weight: 600;">Keterangan</th>
+                    <th style="padding: 8px; font-weight: 600; text-align: right;">Jumlah Pendapatan (Rp)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${transaksiCourier.length === 0 ? `<tr><td colspan="4" style="padding: 10px; text-align: center; color: #999;">Belum ada data</td></tr>` :
+              transaksiCourier.map(t => `
+                      <tr style="border-bottom: 1px solid #f1f5f9;">
+                        <td style="padding: 8px;">${new Date(t.tanggal).toLocaleDateString('id-ID')}</td>
+                        <td style="padding: 8px; font-weight: 600;">${t.profiles?.name || "Anonim"}</td>
+                        <td style="padding: 8px;">${t.keterangan || "-"}</td>
+                        <td style="padding: 8px; text-align: right; font-weight: bold; color: #ef4444;">- Rp ${(t.jumlah || 0).toLocaleString("id-ID")}</td>
+                      </tr>
+                    `).join('')
+            }
+                </tbody>
+              </table>
+            </div>
+          `;
+        }
+
+        printDiv.innerHTML = html;
+        document.body.appendChild(printDiv);
+
+        html2canvas(printDiv, { scale: 2, backgroundColor: "#ffffff" }).then((canvas) => {
+          const imgData = canvas.toDataURL("image/png");
+          const pdf = new jsPDF("p", "mm", "a4");
+          const pdfWidth = pdf.internal.pageSize.getWidth();
+          const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+          let heightLeft = pdfHeight;
+          let position = 0;
+          const pageHeight = pdf.internal.pageSize.getHeight();
+
+          pdf.addImage(imgData, "PNG", 0, position, pdfWidth, pdfHeight);
+          heightLeft -= pageHeight;
+
+          while (heightLeft >= 0) {
+            position = heightLeft - pdfHeight;
+            pdf.addPage();
+            pdf.addImage(imgData, "PNG", 0, position, pdfWidth, pdfHeight);
+            heightLeft -= pageHeight;
+          }
+
+          pdf.save(`Laporan_Terpadu_WebGIS_${new Date().toISOString().split("T")[0]}.pdf`);
+          document.body.removeChild(printDiv);
+          Swal.close();
+          Swal.fire({ icon: 'success', title: 'Export Berhasil', text: 'File Laporan PDF telah diunduh.' });
+        }).catch(err => {
+          console.error(err);
+          Swal.fire({ icon: 'error', title: 'Export Gagal', text: err.message });
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      Swal.fire({ icon: 'error', title: 'Terjadi Kesalahan', text: e.message });
+    }
+  };
+
+  const openExportDialog = () => {
+    Swal.fire({
+      title: 'Export Laporan Terpadu',
+      html: `
+        <div style="text-align: left; font-size: 14px;">
+          <p style="margin-bottom: 12px; color: var(--color-text-muted);">Pilih jenis laporan yang ingin diexport:</p>
+          <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="chk-sampah" checked style="width: 16px; height: 16px;" />
+              Laporan Sampah (Warga)
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="chk-retribusi" checked style="width: 16px; height: 16px;" />
+              Pembayaran Retribusi (Warga)
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="chk-pengangkutan" checked style="width: 16px; height: 16px;" />
+              Pengangkutan Sampah (Log)
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="chk-courier" checked style="width: 16px; height: 16px;" />
+              Pendapatan / Transaksi Courier
+            </label>
+          </div>
+          <p style="margin-bottom: 8px; color: var(--color-text-muted);">Pilih Format Dokumen:</p>
+          <div style="display: flex; gap: 16px;">
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="radio" name="export-format" value="pdf" checked style="width: 16px; height: 16px;" />
+              PDF (Laporan Resmi)
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="radio" name="export-format" value="csv" style="width: 16px; height: 16px;" />
+              Excel / CSV (Data Tabel)
+            </label>
+          </div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Export Sekarang',
+      cancelButtonText: 'Batal',
+      confirmButtonColor: '#10b981',
+      preConfirm: () => {
+        const sampah = document.getElementById('chk-sampah').checked;
+        const retribusi = document.getElementById('chk-retribusi').checked;
+        const pengangkutan = document.getElementById('chk-pengangkutan').checked;
+        const courier = document.getElementById('chk-courier').checked;
+        const format = document.querySelector('input[name="export-format"]:checked').value;
+
+        if (!sampah && !retribusi && !pengangkutan && !courier) {
+          Swal.showValidationMessage('Silakan pilih minimal satu laporan!');
+          return false;
+        }
+
+        return {
+          selectedReports: { sampah, retribusi, pengangkutan, courier },
+          format
+        };
+      }
+    }).then((result) => {
+      if (result.isConfirmed) {
+        triggerExport(result.value);
+      }
     });
   };
 
@@ -397,129 +739,149 @@ export default function Admin() {
             {/* ── TAB: Ringkasan ── */}
             {activeTab === "ringkasan" && (
               <>
-              <div id="pdf-content">
-                <div className="dashboard-grid">
-                  <div className="stat-card">
-                    <div className="stat-icon-wrapper">
-                      <span className="stat-title">TPS Terdaftar</span>
-                      <svg className="stat-icon-svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /></svg>
+                <div id="pdf-content">
+                  <div className="dashboard-grid">
+                    <div className="stat-card">
+                      <div className="stat-icon-wrapper">
+                        <span className="stat-title">TPS Terdaftar</span>
+                        <svg className="stat-icon-svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /></svg>
+                      </div>
+                      <div className="stat-value">{stats.tps} Titik</div>
                     </div>
-                    <div className="stat-value">{stats.tps} Titik</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="stat-icon-wrapper">
-                      <span className="stat-title">Armada Courier</span>
-                      <svg className="stat-icon-svg" style={{ color: "#3b82f6" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                    <div className="stat-card">
+                      <div className="stat-icon-wrapper">
+                        <span className="stat-title">Armada Courier</span>
+                        <svg className="stat-icon-svg" style={{ color: "#3b82f6" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                      </div>
+                      <div className="stat-value" style={{ color: "#3b82f6" }}>{stats.Courier} Akun</div>
                     </div>
-                    <div className="stat-value" style={{ color: "#3b82f6" }}>{stats.Courier} Akun</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="stat-icon-wrapper">
-                      <span className="stat-title">Eco Citizen Aktif</span>
-                      <svg className="stat-icon-svg" style={{ color: "#f59e0b" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M16 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                    <div className="stat-card">
+                      <div className="stat-icon-wrapper">
+                        <span className="stat-title">Eco Citizen Aktif</span>
+                        <svg className="stat-icon-svg" style={{ color: "#f59e0b" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M16 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                      </div>
+                      <div className="stat-value" style={{ color: "#f59e0b" }}>{stats.warga} Warga</div>
                     </div>
-                    <div className="stat-value" style={{ color: "#f59e0b" }}>{stats.warga} Warga</div>
-                  </div>
-                  <div className="stat-card" style={{ cursor: "pointer", borderColor: stats.menunggu > 0 ? "#f59e0b" : "#e2e8f0" }} onClick={() => setActiveTab("pembayaran")}>
-                    <div className="stat-icon-wrapper">
-                      <span className="stat-title">Menunggu Verifikasi</span>
-                      <svg className="stat-icon-svg" style={{ color: stats.menunggu > 0 ? "#d97706" : "#dc2626" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+                    <div className="stat-card" style={{ cursor: "pointer", borderColor: stats.menunggu > 0 ? "#f59e0b" : "#e2e8f0" }} onClick={() => setActiveTab("pembayaran")}>
+                      <div className="stat-icon-wrapper">
+                        <span className="stat-title">Menunggu Verifikasi</span>
+                        <svg className="stat-icon-svg" style={{ color: stats.menunggu > 0 ? "#d97706" : "#dc2626" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+                      </div>
+                      <div className="stat-value" style={{ color: stats.menunggu > 0 ? "#d97706" : "var(--color-text-main)" }}>
+                        {stats.menunggu} {stats.menunggu > 0 ? "⏳ Perlu Verifikasi" : "Pembayaran"}
+                      </div>
                     </div>
-                    <div className="stat-value" style={{ color: stats.menunggu > 0 ? "#d97706" : "var(--color-text-main)" }}>
-                      {stats.menunggu} {stats.menunggu > 0 ? "⏳ Perlu Verifikasi" : "Pembayaran"}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="map-container-wrapper" style={{ height: "350px", display: "flex", flexDirection: "column" }}>
-                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Tren Laporan & Volume Sampah Masuk</h3>
-                  <div style={{ flex: 1, minHeight: 0 }}>
-                    {chartData.length === 0 ? (
-                      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada data untuk ditampilkan.</div>
-                    ) : (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                          <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} dy={10} />
-                          <YAxis yAxisId="left" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} dx={-10} />
-                          <YAxis yAxisId="right" orientation="right" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} dx={10} />
-                          <Tooltip 
-                            contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)", fontSize: "12px" }}
-                            itemStyle={{ fontWeight: 600 }}
-                          />
-                          <Line yAxisId="left" type="monotone" dataKey="Total Berat (Kg)" stroke="#10b981" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
-                          <Line yAxisId="right" type="monotone" dataKey="Total Laporan" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="map-container-wrapper" style={{ height: "350px", display: "flex", flexDirection: "column" }}>
-                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Komposisi Jenis Sampah</h3>
-                  <div style={{ flex: 1, minHeight: 0 }}>
-                    {pieData.length === 0 ? (
-                      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada data komposisi.</div>
-                    ) : (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie data={pieData} cx="50%" cy="50%" labelLine={false} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} outerRadius={100} fill="#8884d8" dataKey="value">
-                            {pieData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'][index % 5]} />
-                            ))}
-                          </Pie>
-                          <Tooltip contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)" }} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    )}
                   </div>
 
-                  {/* Leaderboard Top 5 Warga */}
-                  <div className="table-container" style={{ flex: "1 1 300px" }}>
-                    <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)", display: "flex", alignItems: "center", gap: "8px" }}>
-                      🏆 Klasemen Top 5 Warga (Eco Poin)
-                    </h3>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                      {[...allWarga]
-                        .map(w => ({
-                          ...w,
-                          totalPoin: (w.sampah || []).reduce((acc, s) => acc + (parseFloat(s.berat) * 10), 0) - (w.redeem_poin?.filter(r => r.status !== 'ditolak').reduce((acc, r) => acc + r.points_cost, 0) || 0)
-                        }))
-                        .filter(w => w.totalPoin > 0)
-                        .sort((a, b) => b.totalPoin - a.totalPoin)
-                        .slice(0, 5)
-                        .map((w, index) => (
-                          <div key={w.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px", background: index === 0 ? "linear-gradient(to right, #fef08a, #fef9c3)" : "#f8fafc", borderRadius: "8px", border: index === 0 ? "1px solid #fde047" : "1px solid #e2e8f0" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                              <div style={{ width: "28px", height: "28px", borderRadius: "14px", background: index === 0 ? "#eab308" : index === 1 ? "#94a3b8" : index === 2 ? "#b45309" : "#cbd5e1", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "13px" }}>
-                                {index + 1}
-                              </div>
-                              <div>
-                                <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--color-text-main)" }}>{w.nama}</div>
-                                <div style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>{getLevelLabel(w.totalPoin).label}</div>
-                              </div>
-                            </div>
-                            <div style={{ fontWeight: 800, color: index === 0 ? "#854d0e" : "#7c3aed", fontSize: "15px" }}>
-                              {w.totalPoin} Poin
-                            </div>
-                          </div>
-                        ))}
-                      {[...allWarga].filter(w => (w.sampah || []).length > 0).length === 0 && (
-                         <div style={{ padding: "20px", textAlign: "center", color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada data poin warga.</div>
+                  <div className="map-container-wrapper" style={{ height: "350px", display: "flex", flexDirection: "column" }}>
+                    <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Tren Pemasukan Retribusi Warga</h3>
+                    <div style={{ flex: 1, minHeight: 0 }}>
+                      {financeChartData.length === 0 ? (
+                        <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada data pemasukan retribusi.</div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={financeChartData} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                            <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} dy={10} />
+                            <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} dx={-10} tickFormatter={(v) => `Rp ${v.toLocaleString("id-ID")}`} />
+                            <Tooltip
+                              contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)", fontSize: "12px" }}
+                              itemStyle={{ fontWeight: 600 }}
+                              formatter={(value) => [`Rp ${value.toLocaleString("id-ID")}`, "Pemasukan"]}
+                            />
+                            <Line type="monotone" dataKey="Pemasukan (Rp)" stroke="#10b981" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
                       )}
                     </div>
                   </div>
+
+                  <div className="map-container-wrapper" style={{ height: "350px", display: "flex", flexDirection: "column" }}>
+                    <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Tren Laporan & Volume Sampah Masuk</h3>
+                    <div style={{ flex: 1, minHeight: 0 }}>
+                      {chartData.length === 0 ? (
+                        <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada data untuk ditampilkan.</div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                            <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} dy={10} />
+                            <YAxis yAxisId="left" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} dx={-10} />
+                            <YAxis yAxisId="right" orientation="right" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} dx={10} />
+                            <Tooltip
+                              contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)", fontSize: "12px" }}
+                              itemStyle={{ fontWeight: 600 }}
+                            />
+                            <Line yAxisId="left" type="monotone" dataKey="Total Berat (Kg)" stroke="#10b981" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                            <Line yAxisId="right" type="monotone" dataKey="Total Laporan" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="map-container-wrapper" style={{ height: "350px", display: "flex", flexDirection: "column" }}>
+                    <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Komposisi Jenis Sampah</h3>
+                    <div style={{ flex: 1, minHeight: 0 }}>
+                      {pieData.length === 0 ? (
+                        <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada data komposisi.</div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie data={pieData} cx="50%" cy="50%" labelLine={false} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} outerRadius={100} fill="#8884d8" dataKey="value">
+                              {pieData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'][index % 5]} />
+                              ))}
+                            </Pie>
+                            <Tooltip contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)" }} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+
+                    {/* Leaderboard Top 5 Warga */}
+                    <div className="table-container" style={{ flex: "1 1 300px" }}>
+                      <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)", display: "flex", alignItems: "center", gap: "8px" }}>
+                        🏆 Klasemen Top 5 Warga (Eco Poin)
+                      </h3>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        {[...allWarga]
+                          .map(w => ({
+                            ...w,
+                            totalPoin: (w.sampah || []).reduce((acc, s) => acc + (parseFloat(s.berat) * 10), 0) - (w.redeem_poin?.filter(r => r.status !== 'ditolak').reduce((acc, r) => acc + r.points_cost, 0) || 0)
+                          }))
+                          .filter(w => w.totalPoin > 0)
+                          .sort((a, b) => b.totalPoin - a.totalPoin)
+                          .slice(0, 5)
+                          .map((w, index) => (
+                            <div key={w.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px", background: index === 0 ? "linear-gradient(to right, #fef08a, #fef9c3)" : "#f8fafc", borderRadius: "8px", border: index === 0 ? "1px solid #fde047" : "1px solid #e2e8f0" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                                <div style={{ width: "28px", height: "28px", borderRadius: "14px", background: index === 0 ? "#eab308" : index === 1 ? "#94a3b8" : index === 2 ? "#b45309" : "#cbd5e1", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "13px" }}>
+                                  {index + 1}
+                                </div>
+                                <div>
+                                  <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--color-text-main)" }}>{w.nama}</div>
+                                  <div style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>{getLevelLabel(w.totalPoin).label}</div>
+                                </div>
+                              </div>
+                              <div style={{ fontWeight: 800, color: index === 0 ? "#854d0e" : "#7c3aed", fontSize: "15px" }}>
+                                {w.totalPoin} Poin
+                              </div>
+                            </div>
+                          ))}
+                        {[...allWarga].filter(w => (w.sampah || []).length > 0).length === 0 && (
+                          <div style={{ padding: "20px", textAlign: "center", color: "var(--color-text-muted)", fontSize: "13px" }}>Belum ada data poin warga.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
                   <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text-main)" }}>Laporan Penumpukan Sampah Masuk (Warga)</h3>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={exportCSV} className="btn-primary" style={{ width: "auto", padding: "8px 16px", fontSize: "13px", gap: "8px", background: "#10b981", borderColor: "#059669" }}>
-                      Export CSV
-                    </button>
-                    <button id="btn-pdf" onClick={exportPDF} className="btn-primary" style={{ width: "auto", padding: "8px 16px", fontSize: "13px", gap: "8px", background: "#ef4444", borderColor: "#dc2626" }}>
-                      Export Laporan PDF
+                    <button onClick={openExportDialog} className="btn-primary" style={{ width: "auto", padding: "8px 16px", fontSize: "13px", gap: "8px", background: "#10b981", borderColor: "#059669" }}>
+                      📥 Export Multi-Laporan (PDF/Excel)
                     </button>
                   </div>
                 </div>
@@ -627,7 +989,13 @@ export default function Admin() {
                                   <span style={{ padding: "4px 10px", borderRadius: "20px", fontSize: "12px", fontWeight: 700, backgroundColor: sc.bg, color: sc.color }}>{sc.label}</span>
                                 </td>
                                 <td style={{ padding: "12px" }}>
-                                  {b.bukti_url ? <button onClick={() => setBuktiModal({ open: true, url: b.bukti_url })} style={{ color: "#3b82f6", fontSize: "12px", textDecoration: "underline", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Lihat Bukti</button> : "-"}
+                                  {b.bukti_url && b.bukti_url !== "manual" ? (
+                                    <button onClick={() => setBuktiModal({ open: true, url: b.bukti_url })} style={{ color: "#3b82f6", fontSize: "12px", textDecoration: "underline", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                                      {b.bukti_url.startsWith("http") && !b.bukti_url.includes("bayar.gg") ? "📷 Lihat Bukti Transfer" : "🔗 Lihat Link Bayar"}
+                                    </button>
+                                  ) : b.bukti_url === "manual" ? (
+                                    <span style={{ fontSize: "12px", color: "#d97706" }}>⚠️ Manual (tanpa bukti)</span>
+                                  ) : "-"}
                                 </td>
                                 <td style={{ padding: "12px" }}>
                                   {b.status === "belum" ? (
@@ -662,6 +1030,9 @@ export default function Admin() {
               <div id="pdf-content">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
                   <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text-main)" }}>Laporan Keuangan Global</h3>
+                  <button onClick={openExportDialog} className="btn-primary" style={{ width: "auto", padding: "8px 16px", fontSize: "13px", gap: "8px", background: "#10b981", borderColor: "#059669" }}>
+                    📥 Export Multi-Laporan (PDF/Excel)
+                  </button>
                 </div>
 
                 <div className="dashboard-grid" style={{ marginBottom: "20px" }}>
@@ -676,6 +1047,40 @@ export default function Admin() {
                   <div className="stat-card">
                     <div className="stat-icon-wrapper"><span className="stat-title">Saldo Bersih</span><svg className="stat-icon-svg" style={{ color: "#3b82f6" }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>
                     <div className="stat-value" style={{ color: "#3b82f6" }}>Rp {(pembayaran.filter(p => p.status === "sudah").reduce((acc, p) => acc + (p.jumlah || 0), 0) - transaksiCourier.reduce((acc, t) => acc + (t.jumlah || 0), 0)).toLocaleString("id-ID")}</div>
+                  </div>
+                </div>
+
+                <div className="map-container-wrapper" style={{ marginTop: 0, marginBottom: "20px" }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Rincian Pemasukan Retribusi (dari Warga)</h3>
+                  <div className="table-container">
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid #e2e8f0", color: "var(--color-text-muted)", textAlign: "left" }}>
+                          <th style={{ padding: "10px 12px" }}>Tanggal</th>
+                          <th style={{ padding: "10px 12px" }}>Warga</th>
+                          <th style={{ padding: "10px 12px" }}>Status</th>
+                          <th style={{ padding: "10px 12px" }}>Jumlah</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pembayaran.length === 0 ? (
+                          <tr><td colSpan="4" style={{ padding: "20px", textAlign: "center", color: "var(--color-text-muted)" }}>Belum ada data retribusi.</td></tr>
+                        ) : (
+                          pembayaran.map(b => (
+                            <tr key={b.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                              <td style={{ padding: "12px", color: "var(--color-text-muted)" }}>{new Date(b.tanggal).toLocaleDateString("id-ID", { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                              <td style={{ padding: "12px", fontWeight: 600 }}>{b.warga?.nama || "Anonim"}</td>
+                              <td style={{ padding: "12px" }}>
+                                <span style={{ padding: "3px 10px", borderRadius: "12px", fontSize: "12px", fontWeight: 600, background: b.status === "sudah" ? "#dcfce7" : "#fef3c7", color: b.status === "sudah" ? "#16a34a" : "#d97706" }}>
+                                  {b.status === "sudah" ? "✓ Lunas" : "⏳ Menunggu"}
+                                </span>
+                              </td>
+                              <td style={{ padding: "12px", color: "#10b981", fontWeight: 700 }}>+ Rp {(b.jumlah || 0).toLocaleString("id-ID")}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 
@@ -821,7 +1226,7 @@ export default function Admin() {
                     <p style={{ fontSize: "12px", color: "var(--color-text-muted)", margin: "4px 0 0 0" }}>Pilih pengguna untuk membalas chat</p>
                   </div>
                   <div style={{ flex: 1, overflowY: "auto", padding: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {[...allWarga.map(w => ({...w, _role: 'Warga'})), ...CourierList.map(t => ({...t, _role: 'Courier', nama: t.name}))]
+                    {[...allWarga.map(w => ({ ...w, _role: 'Warga' })), ...CourierList.map(t => ({ ...t, _role: 'Courier', nama: t.name }))]
                       .sort((a, b) => {
                         const timeA = lastMessages[a.id] || 0;
                         const timeB = lastMessages[b.id] || 0;
@@ -829,32 +1234,32 @@ export default function Admin() {
                         return (a.nama || "").localeCompare(b.nama || "");
                       })
                       .map(u => (
-                      <button 
-                        key={u.id} 
-                        onClick={() => setChatTarget(u)} 
-                        style={{ padding: "14px", textAlign: "left", background: chatTarget?.id === u.id ? "#ecfdf5" : "#fff", border: chatTarget?.id === u.id ? "1px solid #34d399" : "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", transition: "all 0.2s" }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontWeight: 700, color: chatTarget?.id === u.id ? "#059669" : "#1e293b", fontSize: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
-                            {onlineUsers[u.id] && <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#4ade80", flexShrink: 0 }}></span>}
-                            {u.nama}
-                          </span>
-                          <span style={{ fontSize: "10px", padding: "2px 6px", borderRadius: "10px", backgroundColor: u._role === 'Warga' ? '#e0f2fe' : '#fef3c7', color: u._role === 'Warga' ? '#0369a1' : '#b45309', fontWeight: 600 }}>{u._role}</span>
-                        </div>
-                        <div style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "6px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {u._role === 'Warga' ? (u.alamat || "Alamat belum diatur") : "Mitra Pengangkut Sampah"}
-                        </div>
-                      </button>
-                    ))}
+                        <button
+                          key={u.id}
+                          onClick={() => setChatTarget(u)}
+                          style={{ padding: "14px", textAlign: "left", background: chatTarget?.id === u.id ? "#ecfdf5" : "#fff", border: chatTarget?.id === u.id ? "1px solid #34d399" : "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", transition: "all 0.2s" }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontWeight: 700, color: chatTarget?.id === u.id ? "#059669" : "#1e293b", fontSize: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
+                              {onlineUsers[u.id] && <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#4ade80", flexShrink: 0 }}></span>}
+                              {u.nama}
+                            </span>
+                            <span style={{ fontSize: "10px", padding: "2px 6px", borderRadius: "10px", backgroundColor: u._role === 'Warga' ? '#e0f2fe' : '#fef3c7', color: u._role === 'Warga' ? '#0369a1' : '#b45309', fontWeight: 600 }}>{u._role}</span>
+                          </div>
+                          <div style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "6px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {u._role === 'Warga' ? (u.alamat || "Alamat belum diatur") : "Mitra Pengangkut Sampah"}
+                          </div>
+                        </button>
+                      ))}
                   </div>
                 </div>
                 <div style={{ flex: 1, position: "relative", backgroundColor: "#fff" }}>
                   {chatTarget ? (
-                    <ChatWidget 
-                      currentUser={{ id: '00000000-0000-0000-0000-000000000000', name: 'Admin' }} 
-                      targetUser={{ id: chatTarget.id, name: chatTarget.nama }} 
-                      isOpen={true} 
-                      onClose={() => setChatTarget(null)} 
+                    <ChatWidget
+                      currentUser={{ id: '00000000-0000-0000-0000-000000000000', name: 'Admin' }}
+                      targetUser={{ id: chatTarget.id, name: chatTarget.nama }}
+                      isOpen={true}
+                      onClose={() => setChatTarget(null)}
                       isEmbedded={true}
                       isTargetOnline={!!onlineUsers[chatTarget.id]}
                     />
@@ -953,7 +1358,7 @@ export default function Admin() {
                   <button onClick={async () => {
                     const name = document.getElementById("newPromoName").value;
                     const cost = document.getElementById("newPromoCost").value;
-                    if(!name || !cost) return alert("Isi nama dan harga poin!");
+                    if (!name || !cost) return alert("Isi nama dan harga poin!");
                     const { error } = await supabase.from("katalog_redeem").insert({ name, cost: parseInt(cost) });
                     if (error) return alert("Gagal menambah promo: " + error.message);
                     document.getElementById("newPromoName").value = "";
@@ -1027,9 +1432,87 @@ export default function Admin() {
             {activeTab === "pengaturan-aplikasi" && (
               <div className="card-animated">
                 <div className="map-container-wrapper" style={{ marginTop: 0 }}>
-                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Pengaturan Aplikasi Admin</h3>
-                  <div style={{ padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                    <p style={{ color: "var(--color-text-muted)", fontSize: "14px", lineHeight: 1.6 }}>Konfigurasi parameter sistem (seperti biaya retribusi dasar, atau radius penjemputan) belum tersedia pada versi ini. Hubungi *developer* untuk integrasi lebih lanjut.</p>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", color: "var(--color-text-main)" }}>Pengaturan Parameter Aplikasi</h3>
+                  <div style={{ padding: "20px", background: "var(--bg-card)", borderRadius: "8px", border: "1px solid var(--border-color)", display: "flex", flexDirection: "column", gap: "16px" }}>
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontWeight: 600 }}>Biaya Retribusi Dasar (Rp)</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        value={appSettings.baseFee}
+                        onChange={(e) => setAppSettings({ ...appSettings, baseFee: parseInt(e.target.value) || 0 })}
+                      />
+                      <small style={{ color: "var(--color-text-muted)" }}>Biaya dasar retribusi bulanan warga.</small>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontWeight: 600 }}>Tarif per Kilometer (Rp/km)</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        value={appSettings.feePerKm}
+                        onChange={(e) => setAppSettings({ ...appSettings, feePerKm: parseInt(e.target.value) || 0 })}
+                      />
+                      <small style={{ color: "var(--color-text-muted)" }}>Tarif tambahan berdasarkan jarak rumah warga ke lokasi TPA.</small>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                      <div className="form-group">
+                        <label className="form-label" style={{ fontWeight: 600 }}>Latitude TPA</label>
+                        <input
+                          type="number"
+                          step="any"
+                          className="form-input"
+                          value={appSettings.tpaLat}
+                          onChange={(e) => setAppSettings({ ...appSettings, tpaLat: parseFloat(e.target.value) || 0 })}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" style={{ fontWeight: 600 }}>Longitude TPA</label>
+                        <input
+                          type="number"
+                          step="any"
+                          className="form-input"
+                          value={appSettings.tpaLng}
+                          onChange={(e) => setAppSettings({ ...appSettings, tpaLng: parseFloat(e.target.value) || 0 })}
+                        />
+                      </div>
+                    </div>
+                    <small style={{ color: "var(--color-text-muted)", marginTop: "-8px" }}>Koordinat lokasi pusat TPA sebagai titik acuan hitung jarak.</small>
+
+                    <button
+                      onClick={async () => {
+                        setSettingsSaving(true);
+                        try {
+                          const blob = new Blob([JSON.stringify(appSettings)], { type: "application/json" });
+                          const { error } = await supabase.storage.from("uploads").upload("settings.json", blob, {
+                            contentType: "application/json",
+                            upsert: true
+                          });
+                          if (error) throw error;
+                          Swal.fire({
+                            icon: "success",
+                            title: "Berhasil",
+                            text: "Pengaturan berhasil disimpan!",
+                            timer: 1500,
+                            showConfirmButton: false
+                          });
+                        } catch (err) {
+                          Swal.fire({
+                            icon: "error",
+                            title: "Gagal Menyimpan",
+                            text: err.message
+                          });
+                        } finally {
+                          setSettingsSaving(false);
+                        }
+                      }}
+                      className="btn-primary"
+                      style={{ marginTop: "12px", width: "auto", alignSelf: "flex-start", padding: "10px 24px" }}
+                      disabled={settingsSaving}
+                    >
+                      {settingsSaving ? "Menyimpan..." : "Simpan Pengaturan"}
+                    </button>
                   </div>
                 </div>
               </div>

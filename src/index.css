@@ -2,22 +2,26 @@
 
 :root {
   --font-main: 'Newsreader', Georgia, serif;
-  
+
   /* Color Palette - Clean Corporate Eco Theme */
   --color-bg-body: #f8fafc;
   --color-bg-card: #ffffff;
   --color-border: #cbd5e1;
   --color-border-focus: #10b981;
-  --color-primary: #059669;       /* Professional solid Forest Emerald */
+  --color-primary: #059669;
+  /* Professional solid Forest Emerald */
   --color-primary-hover: #047857;
   --color-primary-light: #ecfdf5;
-  --color-text-main: #0f172a;      /* Dark slate text */
-  --color-text-muted: #64748b;     /* Medium gray text */
+  --color-text-main: #0f172a;
+  /* Dark slate text */
+  --color-text-muted: #64748b;
+  /* Medium gray text */
   --color-error: #dc2626;
   --color-success: #16a34a;
-  
+
   /* Sidebar Palette */
-  --color-sidebar-bg: #0f172a;     /* Deep slate blue */
+  --color-sidebar-bg: #0f172a;
+  /* Deep slate blue */
   --color-sidebar-text: #94a3b8;
   --color-sidebar-text-active: #ffffff;
   --color-sidebar-item-hover: #1e293b;
@@ -527,7 +531,9 @@ a:hover {
 }
 
 /* General Utilities */
-.text-center { text-align: center; }
+.text-center {
+  text-align: center;
+}
 
 /* Sidebar SVG Icon alignment and sizing */
 .sidebar-menu .menu-item svg {
@@ -549,6 +555,7 @@ a:hover {
   grid-template-columns: 1fr 1fr;
   gap: 24px;
 }
+
 .grid-form-map {
   display: grid;
   grid-template-columns: 1fr 1.4fr;
@@ -559,7 +566,7 @@ a:hover {
   .dashboard-layout {
     flex-direction: column;
   }
-  
+
   /* Mobile Sidebar as Top Navbar */
   .sidebar {
     width: 100% !important;
@@ -572,22 +579,22 @@ a:hover {
     border-right: none;
     border-bottom: 1px solid #1e293b;
   }
-  
-  .sidebar > div:first-child {
+
+  .sidebar>div:first-child {
     margin-bottom: 0 !important;
   }
 
   /* When collapsed on mobile, hide menu and profile */
   .sidebar.collapsed ul,
-  .sidebar.collapsed > div:last-child {
+  .sidebar.collapsed>div:last-child {
     display: none !important;
   }
-  
+
   /* When NOT collapsed on mobile, show menu items */
   .sidebar:not(.collapsed) ul {
     margin-top: 16px !important;
   }
-  
+
   /* Always show title on mobile regardless of collapse state */
   .sidebar.collapsed .sidebar-brand-title {
     display: block !important;
@@ -596,17 +603,19 @@ a:hover {
   .auth-card {
     padding: 30px 20px;
   }
-  
+
   .main-content {
     padding: 16px;
   }
-  
+
   /* Responsive Grids */
-  .dashboard-grid, .grid-2-col, .grid-form-map {
+  .dashboard-grid,
+  .grid-2-col,
+  .grid-form-map {
     grid-template-columns: 1fr !important;
     gap: 16px;
   }
-  
+
   /* Responsive Tables */
   .table-container {
     overflow-x: auto;
@@ -618,10 +627,12 @@ a:hover {
 .icon-mobile-toggle {
   display: none;
 }
+
 @media (max-width: 768px) {
   .icon-desktop-toggle {
     display: none;
   }
+
   .icon-mobile-toggle {
     display: block;
   }
@@ -639,19 +650,23 @@ a:hover {
   display: flex;
   justify-content: center;
   align-items: center;
-  background-color: rgba(255, 255, 255, 0.3);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background-color: rgba(5, 150, 105, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   z-index: 99999;
 }
 
 .stagger-text {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-  font-size: 56px;
+  font-size: clamp(24px, 8vw, 56px);
   font-weight: 900;
   letter-spacing: 2px;
-  color: var(--color-primary);
+  color: #ffffff;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0 16px;
+  text-align: center;
 }
 
 .stagger-char {
@@ -660,7 +675,11 @@ a:hover {
 }
 
 @keyframes popIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
+  from {
+    opacity: 0;
+  }
 
+  to {
+    opacity: 1;
+  }
+}
